@@ -30,50 +30,47 @@
                     <input type="text" id="cStoreId" required>
                 </div>
                 <div class="login-error" id="customerLoginError" hidden></div>
-                <button type="submit" class="primary-btn login-btn">دخول</button>
+                <button type="submit" class="primary-btn login-btn" id="loginSubmitBtn">دخول</button>
             </form>
-
-            <p class="login-hint" id="loginHint" hidden>
-                لا توجد حسابات بعد. على الادمين إضافة المستخدمين أولاً من لوحة التحكم.
-            </p>
         </div>
     </div>
 
     <script src="data.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // Apply theme so the login page matches the rest of the site.
             const settings = BWS.getSettings();
             const root = document.documentElement;
             root.style.setProperty('--primary', settings.theme.primary);
             root.style.setProperty('--primary-dark', settings.theme.primaryDark);
             root.style.setProperty('--primary-light', settings.theme.primaryLight);
 
-            // Already logged in → go home.
-            if (BWS.getCustomerSession()) {
+            if (BWS.getCustomerSession() && BWS.getSessionToken()) {
                 window.location.href = 'index.html';
                 return;
             }
 
-            // If no users exist yet, show a hint so the admin knows what to do.
-            if (BWS.getUsers().length === 0) {
-                document.getElementById('loginHint').hidden = false;
-            }
-
             const form = document.getElementById('customerLoginForm');
             const errEl = document.getElementById('customerLoginError');
+            const submitBtn = document.getElementById('loginSubmitBtn');
 
-            form.addEventListener('submit', (e) => {
+            form.addEventListener('submit', async (e) => {
                 e.preventDefault();
+                errEl.hidden = true;
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'جاري التحقق...';
+
                 const username = document.getElementById('cUsername').value;
                 const password = document.getElementById('cPassword').value;
                 const storeId = document.getElementById('cStoreId').value;
-                const result = BWS.customerLogin(username, password, storeId);
+
+                const result = await BWS.customerLogin(username, password, storeId);
                 if (result.ok) {
                     window.location.href = 'index.html';
                 } else {
                     errEl.hidden = false;
                     errEl.textContent = result.error;
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'دخول';
                 }
             });
         });

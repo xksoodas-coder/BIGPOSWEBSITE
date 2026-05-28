@@ -17,8 +17,7 @@
             <nav class="admin-nav">
                 <a href="admin-dashboard.html" class="active">لوحة التحكم</a>
                 <a href="admin-categories.html">إدارة التصنيفات</a>
-                <a href="admin-users.html">المستخدمون</a>
-                <a href="admin-settings.html">الإعدادات</a>
+                                <a href="admin-settings.html">الإعدادات</a>
                 <a href="index.html">عرض المتجر</a>
             </nav>
             <button class="logout-btn" id="logoutBtn">خروج</button>
@@ -30,20 +29,12 @@
 
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="stat-label">رمز المتجر</div>
-                <div class="stat-value" id="statStoreId" style="font-family:monospace;letter-spacing:2px;color:var(--primary)">—</div>
-            </div>
-            <div class="stat-card">
                 <div class="stat-label">إجمالي التصنيفات</div>
                 <div class="stat-value" id="statTotalCategories">0</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">عدد المستخدمين</div>
-                <div class="stat-value" id="statTotalUsers">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">وضع الوصول</div>
-                <div class="stat-value" id="statSiteMode" style="font-size:18px">—</div>
+                <div class="stat-label">حالة المزامنة</div>
+                <div class="stat-value sync-status">مربوط ب Turso</div>
             </div>
         </div>
 
@@ -53,10 +44,6 @@
                 <a href="admin-categories.html" class="quick-action-btn">
                     <span class="qa-icon">⚙</span>
                     <span>إدارة التصنيفات</span>
-                </a>
-                <a href="admin-users.html" class="quick-action-btn">
-                    <span class="qa-icon">👤</span>
-                    <span>إدارة المستخدمين</span>
                 </a>
                 <a href="admin-settings.html" class="quick-action-btn">
                     <span class="qa-icon">🎨</span>

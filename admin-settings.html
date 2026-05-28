@@ -17,8 +17,7 @@
             <nav class="admin-nav">
                 <a href="admin-dashboard.html">لوحة التحكم</a>
                 <a href="admin-categories.html">إدارة التصنيفات</a>
-                <a href="admin-users.html">المستخدمون</a>
-                <a href="admin-settings.html" class="active">الإعدادات</a>
+                                <a href="admin-settings.html" class="active">الإعدادات</a>
                 <a href="index.html">عرض المتجر</a>
             </nav>
             <button class="logout-btn" id="logoutBtn">خروج</button>
@@ -80,53 +79,6 @@
                 <div class="form-group">
                     <label for="announcement">نص الشريط</label>
                     <input type="text" id="announcement" class="admin-input" placeholder="مثال: التوصيل السريع لكل ما تحتاج إليه عبر المتجر">
-                </div>
-            </div>
-
-            <!-- Site visibility -->
-            <div class="admin-card">
-                <h2>وصول الموقع</h2>
-                <p class="muted" style="margin-bottom:14px;font-size:13px">
-                    اختر إذا كان الموقع مفتوحًا للجميع أو خاص بعدد محدد من الزبائن
-                    يحتاجون تسجيل دخول. عندما يكون خاصًا، يجب على الادمين إنشاء حسابات
-                    الزبائن أولاً من صفحة <a href="admin-users.html">المستخدمين</a>.
-                </p>
-
-                <div class="cart-mode-options">
-                    <label class="cart-mode-card">
-                        <input type="radio" name="siteMode" value="public" id="siteModePublic">
-                        <div class="mode-preview">
-                            <div class="mode-mock mode-mock-public">
-                                <div class="mock-globe"></div>
-                            </div>
-                        </div>
-                        <div class="mode-info">
-                            <strong>موقع عام</strong>
-                            <p>أي زبون يستطيع تصفح المنتجات بدون تسجيل دخول.</p>
-                        </div>
-                    </label>
-
-                    <label class="cart-mode-card">
-                        <input type="radio" name="siteMode" value="private" id="siteModePrivate">
-                        <div class="mode-preview">
-                            <div class="mode-mock mode-mock-private">
-                                <div class="mock-lock"></div>
-                            </div>
-                        </div>
-                        <div class="mode-info">
-                            <strong>خاص بزبائن محددين</strong>
-                            <p>يتطلب اسم مستخدم وكلمة مرور ورمز متجر لدخول الموقع.</p>
-                        </div>
-                    </label>
-                </div>
-
-                <div class="store-id-hint">
-                    <strong>رمز المتجر الحالي:</strong>
-                    <code id="settingsStoreId">—</code>
-                    <p class="muted" style="font-size:12px;margin-top:6px">
-                        يتم استلامه تلقائيًا من نظام المزامنة (sync) الخاص بالحاسوب،
-                        ولا يمكن تعديله من هنا. هذا هو الرمز الذي يدخله الزبون عند تسجيل الدخول.
-                    </p>
                 </div>
             </div>
 

@@ -1,36 +1,39 @@
 /*
- * BigWebStore – Customer-side controller.
- * Routes each page to the right render call based on which DOM IDs exist.
+ * BigWebStore – customer-side controller.
+ * Pages render via async API fetches; cart state stays in localStorage.
  */
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     applyThemeAndAnnouncement();
-    if (!enforcePrivateAccess()) return;   // redirected → stop init
+    if (!enforcePrivateAccess()) return;
     updateCartBadge();
     wireSearchPanel();
     initCartSidebar();
     wireCartIcons();
     renderCustomerBadge();
 
-    if (document.getElementById('categoriesGrid')) {
-        renderCategoriesGrid();
-    }
-    if (document.getElementById('productsGrid')) {
-        renderProductsPage();
-    }
-    if (document.getElementById('cartContainer')) {
-        renderCartPage();
-    }
-    if (document.getElementById('contactForm')) {
-        wireContactForm();
+    try {
+        if (document.getElementById('categoriesGrid')) {
+            await renderCategoriesGrid();
+        }
+        if (document.getElementById('productsGrid')) {
+            await renderProductsPage();
+        }
+        if (document.getElementById('cartContainer')) {
+            renderCartPage();
+        }
+        if (document.getElementById('contactForm')) {
+            wireContactForm();
+        }
+    } catch (err) {
+        console.error(err);
+        showToast(err.message || 'تعذّر تحميل البيانات');
     }
 });
 
-// ===== Private-mode gate =====
+// ===== Login gate (always required — multi-tenant) =====
 function enforcePrivateAccess() {
-    const settings = BWS.getSettings();
-    if (settings.siteMode !== 'private') return true;
-    if (BWS.getCustomerSession()) return true;
+    if (BWS.getCustomerSession() && BWS.getSessionToken()) return true;
     if (/login\.html$/i.test(window.location.pathname)) return true;
     window.location.replace('login.html');
     return false;
@@ -46,19 +49,14 @@ function renderCustomerBadge() {
     const wrap = document.createElement('div');
     wrap.className = 'customer-info';
     wrap.innerHTML = `
-        <span class="customer-name">${escapeHtml(session.username)}</span>
+        <span class="customer-name">${escapeHtml(session.name || session.username)}</span>
         <button class="customer-logout" id="customerLogoutBtn">خروج</button>
     `;
     headerLeft.appendChild(wrap);
 
     document.getElementById('customerLogoutBtn').addEventListener('click', () => {
         BWS.customerLogout();
-        const settings = BWS.getSettings();
-        if (settings.siteMode === 'private') {
-            window.location.href = 'login.html';
-        } else {
-            window.location.reload();
-        }
+        window.location.href = 'login.html';
     });
 }
 
@@ -99,16 +97,20 @@ function wireSearchPanel() {
         if (input) input.focus();
     });
     close?.addEventListener('click', () => panel.classList.remove('open'));
-    input?.addEventListener('keydown', (e) => {
+    input?.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
             const q = input.value.trim().toLowerCase();
             if (!q) return;
-            const match = BWS.getVisibleFamilies()
-                .find(f => f.name.toLowerCase().includes(q));
-            if (match) {
-                window.location.href = `products.html?familyId=${match.id}`;
-            } else {
-                showToast('لم يتم العثور على نتائج.');
+            try {
+                const families = await BWS.getVisibleFamilies();
+                const match = families.find(f => f.name.toLowerCase().includes(q));
+                if (match) {
+                    window.location.href = `products.html?familyId=${match.id}`;
+                } else {
+                    showToast('لم يتم العثور على نتائج.');
+                }
+            } catch (err) {
+                showToast(err.message || 'خطأ في البحث');
             }
         } else if (e.key === 'Escape') {
             panel.classList.remove('open');
@@ -149,7 +151,8 @@ function initCartSidebar() {
     backdrop.addEventListener('click', closeCartSidebar);
     sidebar.querySelector('#sidebarClose').addEventListener('click', closeCartSidebar);
     sidebar.querySelector('#sidebarCheckoutBtn').addEventListener('click', () => {
-        showToast('سيتم تفعيل الطلب بعد ربط النظام بالحاسوب');
+        closeCartSidebar();
+        window.location.href = 'cart.html';
     });
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') closeCartSidebar();
@@ -175,26 +178,22 @@ function renderCartSidebar() {
     if (items.length === 0) {
         container.innerHTML = '<p class="empty-sidebar">السلة فارغة</p>';
     } else {
-        container.innerHTML = items.map(it => {
-            const p = BWS.getProductById(it.id);
-            if (!p) return '';
-            return `
-                <div class="sidebar-item" data-product-id="${p.id}">
-                    <div class="sidebar-item-img">
-                        ${renderImageOrPlaceholder(p.image, p.name.charAt(0))}
-                    </div>
-                    <div class="sidebar-item-info">
-                        <h4>${escapeHtml(p.name)}</h4>
-                        <div class="item-price">${BWS.formatPrice(p.sellPrice)} × ${it.qty}</div>
-                    </div>
-                    <button class="sidebar-item-remove" aria-label="حذف">×</button>
+        container.innerHTML = items.map(it => `
+            <div class="sidebar-item" data-uuid="${escapeHtml(it.uuid)}">
+                <div class="sidebar-item-img">
+                    ${renderImageOrPlaceholder(null, (it.name || '?').charAt(0))}
                 </div>
-            `;
-        }).join('');
+                <div class="sidebar-item-info">
+                    <h4>${escapeHtml(it.name)}</h4>
+                    <div class="item-price">${BWS.formatPrice(it.price)} × ${it.qty}</div>
+                </div>
+                <button class="sidebar-item-remove" aria-label="حذف">×</button>
+            </div>
+        `).join('');
         container.querySelectorAll('.sidebar-item').forEach(row => {
-            const id = Number(row.dataset.productId);
+            const uuid = row.dataset.uuid;
             row.querySelector('.sidebar-item-remove').addEventListener('click', () => {
-                BWS.removeFromCart(id);
+                BWS.removeFromCart(uuid);
                 renderCartSidebar();
                 updateCartBadge();
             });
@@ -217,9 +216,22 @@ function wireCartIcons() {
 }
 
 // ===== Categories Grid =====
-function renderCategoriesGrid() {
+async function renderCategoriesGrid() {
     const grid = document.getElementById('categoriesGrid');
-    const families = BWS.getVisibleFamilies();
+    grid.innerHTML = '<div class="empty-state"><p>جاري التحميل...</p></div>';
+
+    let families;
+    try {
+        families = await BWS.getVisibleFamilies();
+    } catch (err) {
+        grid.innerHTML = `
+            <div class="empty-state">
+                <h2>تعذّر تحميل التصنيفات</h2>
+                <p>${escapeHtml(err.message || '')}</p>
+            </div>
+        `;
+        return;
+    }
 
     if (families.length === 0) {
         grid.innerHTML = `
@@ -234,7 +246,7 @@ function renderCategoriesGrid() {
     grid.innerHTML = families.map(f => `
         <a href="products.html?familyId=${f.id}" class="category-card">
             <div class="category-image">
-                ${renderImageOrPlaceholder(f.image, f.initial || f.name.charAt(0))}
+                ${renderImageOrPlaceholder(null, f.name.charAt(0))}
             </div>
             <div class="category-name">${escapeHtml(f.name)}</div>
         </a>
@@ -249,36 +261,46 @@ function renderImageOrPlaceholder(src, fallbackText) {
 }
 
 // ===== Products Page =====
-function renderProductsPage() {
+async function renderProductsPage() {
     const params = new URLSearchParams(window.location.search);
     const familyId = Number(params.get('familyId'));
-    const family = BWS.getFamilyById(familyId);
 
     const titleEl = document.getElementById('productsPageTitle');
     const subtitleEl = document.getElementById('productsPageSubtitle');
+    const grid = document.getElementById('productsGrid');
+    const emptyState = document.getElementById('emptyState');
 
+    titleEl.textContent = 'جاري التحميل...';
+    subtitleEl.textContent = '';
+
+    const family = await BWS.getFamilyById(familyId);
     if (!family) {
         titleEl.textContent = 'تصنيف غير موجود';
         subtitleEl.textContent = 'الرجاء اختيار تصنيف من قائمة التصنيفات';
-        document.getElementById('emptyState').style.display = 'block';
+        emptyState.style.display = 'block';
         return;
     }
 
-    // Block access to hidden categories.
     const hidden = new Set(BWS.getHiddenIds());
     if (hidden.has(family.id)) {
         titleEl.textContent = 'هذا التصنيف غير متاح';
         subtitleEl.textContent = '';
-        document.getElementById('emptyState').style.display = 'block';
+        emptyState.style.display = 'block';
         return;
     }
 
     titleEl.textContent = family.name;
     subtitleEl.textContent = 'منتجات التصنيف';
 
-    const products = BWS.getProductsForFamily(family.name);
-    const grid = document.getElementById('productsGrid');
-    const emptyState = document.getElementById('emptyState');
+    let products;
+    try {
+        products = await BWS.fetchProductsForFamily(family.name);
+    } catch (err) {
+        titleEl.textContent = 'تعذّر تحميل المنتجات';
+        subtitleEl.textContent = err.message || '';
+        emptyState.style.display = 'block';
+        return;
+    }
 
     if (products.length === 0) {
         grid.style.display = 'none';
@@ -286,31 +308,35 @@ function renderProductsPage() {
         return;
     }
 
+    grid.style.display = '';
+    emptyState.style.display = 'none';
     grid.innerHTML = products.map(p => {
-        const available = p.totalQuantity > 0;
+        const available = p.available && p.quantity > 0;
         return `
-            <div class="product-card${available ? '' : ' unavailable'}">
+            <div class="product-card${available ? '' : ' unavailable'}" data-uuid="${escapeHtml(p.uuid)}">
                 <div class="product-image">
-                    ${renderImageOrPlaceholder(p.image, p.name.charAt(0))}
+                    ${renderImageOrPlaceholder(null, (p.name || '?').charAt(0))}
                 </div>
                 <div class="product-name">${escapeHtml(p.name)}</div>
-                <div class="product-price">${BWS.formatPrice(p.sellPrice)}</div>
+                <div class="product-price">${BWS.formatPrice(p.price)}</div>
                 <div class="product-status ${available ? 'status-available' : 'status-unavailable'}">
                     ${available ? 'متاح' : 'غير متاح'}
                 </div>
-                <button class="add-cart-btn"
-                        data-product-id="${p.id}"
-                        ${available ? '' : 'hidden'}>
+                <button class="add-cart-btn" ${available ? '' : 'hidden'}>
                     إضافة إلى السلة
                 </button>
             </div>
         `;
     }).join('');
 
-    grid.querySelectorAll('.add-cart-btn').forEach(btn => {
+    const productByUuid = new Map(products.map(p => [p.uuid, p]));
+    grid.querySelectorAll('.product-card').forEach(card => {
+        const uuid = card.dataset.uuid;
+        const btn = card.querySelector('.add-cart-btn');
+        if (!btn) return;
         btn.addEventListener('click', () => {
-            const id = Number(btn.dataset.productId);
-            if (BWS.addToCart(id, 1)) {
+            const product = productByUuid.get(uuid);
+            if (BWS.addToCart(product, 1)) {
                 updateCartBadge();
                 if (document.getElementById('cartSidebar')?.classList.contains('open')) {
                     renderCartSidebar();
@@ -337,51 +363,48 @@ function renderCartPage() {
         return;
     }
 
-    container.innerHTML = cart.map(item => {
-        const p = BWS.getProductById(item.id);
-        if (!p) return '';
-        return `
-            <div class="cart-item" data-product-id="${p.id}">
-                <div class="cart-item-image">
-                    ${renderImageOrPlaceholder(p.image, p.name.charAt(0))}
-                </div>
-                <div class="cart-item-info">
-                    <h4>${escapeHtml(p.name)}</h4>
-                    <div class="item-price">${BWS.formatPrice(p.sellPrice)}</div>
-                    <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(p.family)}</div>
-                </div>
-                <div class="qty-controls">
-                    <button class="qty-btn qty-dec" aria-label="تقليل">−</button>
-                    <span class="qty-value">${item.qty}</span>
-                    <button class="qty-btn qty-inc" aria-label="زيادة">+</button>
-                </div>
-                <button class="remove-btn">حذف</button>
+    container.style.display = '';
+    summary.style.display = '';
+    emptyState.style.display = 'none';
+
+    container.innerHTML = cart.map(item => `
+        <div class="cart-item" data-uuid="${escapeHtml(item.uuid)}">
+            <div class="cart-item-image">
+                ${renderImageOrPlaceholder(null, (item.name || '?').charAt(0))}
             </div>
-        `;
-    }).join('');
+            <div class="cart-item-info">
+                <h4>${escapeHtml(item.name)}</h4>
+                <div class="item-price">${BWS.formatPrice(item.price)}</div>
+                <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(item.family || '')}</div>
+            </div>
+            <div class="qty-controls">
+                <button class="qty-btn qty-dec" aria-label="تقليل">−</button>
+                <span class="qty-value">${item.qty}</span>
+                <button class="qty-btn qty-inc" aria-label="زيادة">+</button>
+            </div>
+            <button class="remove-btn">حذف</button>
+        </div>
+    `).join('');
 
     container.querySelectorAll('.cart-item').forEach(row => {
-        const id = Number(row.dataset.productId);
+        const uuid = row.dataset.uuid;
         row.querySelector('.qty-dec').addEventListener('click', () => {
-            const current = BWS.getCart().find(it => it.id === id);
+            const current = BWS.getCart().find(it => it.uuid === uuid);
             if (!current) return;
-            if (current.qty <= 1) {
-                BWS.removeFromCart(id);
-            } else {
-                BWS.updateCartQty(id, current.qty - 1);
-            }
+            if (current.qty <= 1) BWS.removeFromCart(uuid);
+            else BWS.updateCartQty(uuid, current.qty - 1);
             renderCartPage();
             updateCartBadge();
         });
         row.querySelector('.qty-inc').addEventListener('click', () => {
-            const current = BWS.getCart().find(it => it.id === id);
+            const current = BWS.getCart().find(it => it.uuid === uuid);
             if (!current) return;
-            BWS.updateCartQty(id, current.qty + 1);
+            BWS.updateCartQty(uuid, current.qty + 1);
             renderCartPage();
             updateCartBadge();
         });
         row.querySelector('.remove-btn').addEventListener('click', () => {
-            BWS.removeFromCart(id);
+            BWS.removeFromCart(uuid);
             renderCartPage();
             updateCartBadge();
             showToast('تم حذف المنتج من السلة');
@@ -391,8 +414,29 @@ function renderCartPage() {
     document.getElementById('summaryCount').textContent = BWS.cartCount();
     document.getElementById('summaryTotal').textContent = BWS.formatPrice(BWS.cartTotal());
 
-    document.getElementById('checkoutBtn').onclick = () => {
-        showToast('سيتم تفعيل الطلب بعد ربط النظام بالحاسوب');
+    const checkoutBtn = document.getElementById('checkoutBtn');
+    checkoutBtn.onclick = async () => {
+        const session = BWS.getCustomerSession();
+        if (!session || !BWS.getSessionToken()) {
+            showToast('الرجاء تسجيل الدخول لإتمام الطلب');
+            setTimeout(() => { window.location.href = 'login.html'; }, 1200);
+            return;
+        }
+        checkoutBtn.disabled = true;
+        checkoutBtn.textContent = 'جاري الإرسال...';
+        const result = await BWS.submitOrder({
+            name: session.name || session.username,
+            phone: session.phone || ''
+        });
+        if (result.ok) {
+            renderCartPage();
+            updateCartBadge();
+            showToast('تم إرسال طلبك. سيتواصل معك المتجر قريبًا.');
+        } else {
+            showToast(result.error || 'تعذّر إرسال الطلب');
+        }
+        checkoutBtn.disabled = false;
+        checkoutBtn.textContent = 'إتمام الطلب';
     };
     document.getElementById('clearCartBtn').onclick = () => {
         if (confirm('هل تريد فعلاً إفراغ السلة؟')) {
@@ -433,7 +477,6 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
-// Globally exposed for the inline onerror handler on <img>.
 function makePlaceholder(text) {
     const div = document.createElement('div');
     div.className = 'category-placeholder';
