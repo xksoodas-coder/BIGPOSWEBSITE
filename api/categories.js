@@ -1,5 +1,6 @@
 import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
+import { familyImageUrl } from './_lib/r2.js';
 
 /**
  * GET /api/categories
@@ -41,10 +42,15 @@ export default async function handler(req, res) {
         const walk = (nodes, parentId) => {
             for (const node of nodes) {
                 const id = nextId++;
+                const uuid = String(node.uuid || '').trim();
+                const imageVersion = String(node.imageVersion || '').trim();
                 families.push({
                     id,
                     parentId,
-                    name: String(node.name || '').trim()
+                    name: String(node.name || '').trim(),
+                    uuid,
+                    imageVersion,
+                    imageUrl: (uuid && imageVersion) ? familyImageUrl(uuid, imageVersion) : ''
                 });
                 if (Array.isArray(node.children) && node.children.length > 0) {
                     walk(node.children, id);

@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initCartSidebar();
     wireCartIcons();
     renderCustomerBadge();
+    applyStoreBranding();
 
     try {
         if (document.getElementById('categoriesGrid')) {
@@ -30,6 +31,35 @@ document.addEventListener('DOMContentLoaded', async () => {
         showToast(err.message || 'تعذّر تحميل البيانات');
     }
 });
+
+// ===== Store branding (logo + name in header/footer) =====
+async function applyStoreBranding() {
+    if (!BWS.getSessionToken()) return;
+    let info;
+    try { info = await BWS.fetchStoreInfo(); } catch { return; }
+    if (!info) return;
+
+    document.querySelectorAll('.logo-circle').forEach(el => {
+        if (info.logoUrl) {
+            el.classList.add('has-logo');
+            el.innerHTML = `<img src="${escapeHtml(info.logoUrl)}" alt="${escapeHtml(info.name || 'logo')}" onerror="this.parentElement.classList.remove('has-logo'); this.replaceWith(makeBSFallback())">`;
+        }
+    });
+
+    if (info.name) {
+        document.querySelectorAll('.footer-brand').forEach(el => {
+            el.textContent = info.name;
+        });
+        document.title = info.name;
+    }
+}
+
+function makeBSFallback() {
+    const span = document.createElement('span');
+    span.textContent = 'BS';
+    return span;
+}
+window.makeBSFallback = makeBSFallback;
 
 // ===== Login gate (always required — multi-tenant) =====
 function enforcePrivateAccess() {
@@ -181,7 +211,7 @@ function renderCartSidebar() {
         container.innerHTML = items.map(it => `
             <div class="sidebar-item" data-uuid="${escapeHtml(it.uuid)}">
                 <div class="sidebar-item-img">
-                    ${renderImageOrPlaceholder(null, (it.name || '?').charAt(0))}
+                    ${renderImageOrPlaceholder(it.imageUrl || null, (it.name || '?').charAt(0))}
                 </div>
                 <div class="sidebar-item-info">
                     <h4>${escapeHtml(it.name)}</h4>
@@ -246,7 +276,7 @@ async function renderCategoriesGrid() {
     grid.innerHTML = families.map(f => `
         <a href="products.html?familyId=${f.id}" class="category-card">
             <div class="category-image">
-                ${renderImageOrPlaceholder(null, f.name.charAt(0))}
+                ${renderImageOrPlaceholder(f.imageUrl || null, f.name.charAt(0))}
             </div>
             <div class="category-name">${escapeHtml(f.name)}</div>
         </a>
@@ -315,7 +345,7 @@ async function renderProductsPage() {
         return `
             <div class="product-card${available ? '' : ' unavailable'}" data-uuid="${escapeHtml(p.uuid)}">
                 <div class="product-image">
-                    ${renderImageOrPlaceholder(null, (p.name || '?').charAt(0))}
+                    ${renderImageOrPlaceholder(p.imageUrl, (p.name || '?').charAt(0))}
                 </div>
                 <div class="product-name">${escapeHtml(p.name)}</div>
                 <div class="product-price">${BWS.formatPrice(p.price)}</div>
@@ -370,7 +400,7 @@ function renderCartPage() {
     container.innerHTML = cart.map(item => `
         <div class="cart-item" data-uuid="${escapeHtml(item.uuid)}">
             <div class="cart-item-image">
-                ${renderImageOrPlaceholder(null, (item.name || '?').charAt(0))}
+                ${renderImageOrPlaceholder(item.imageUrl || null, (item.name || '?').charAt(0))}
             </div>
             <div class="cart-item-info">
                 <h4>${escapeHtml(item.name)}</h4>

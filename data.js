@@ -27,6 +27,7 @@ const BWS = (function () {
 
     // In-memory cache, refilled per page load.
     let _familiesCache = null;
+    let _storeInfoCache = null;
     const _productsByFamily = new Map();
 
     // ----- small storage helpers -----
@@ -154,6 +155,18 @@ const BWS = (function () {
             return all.find(f => f.id === Number(id)) || null;
         },
 
+        // ----- store info (server) -----
+        async fetchStoreInfo({ force = false } = {}) {
+            if (!force && _storeInfoCache) return _storeInfoCache;
+            try {
+                const data = await apiFetch('/api/store', { method: 'GET' });
+                _storeInfoCache = { name: data.name || '', logoUrl: data.logoUrl || '' };
+            } catch {
+                _storeInfoCache = { name: '', logoUrl: '' };
+            }
+            return _storeInfoCache;
+        },
+
         // ----- products (server) -----
         async fetchProductsForFamily(familyName) {
             if (_productsByFamily.has(familyName)) return _productsByFamily.get(familyName);
@@ -185,6 +198,7 @@ const BWS = (function () {
                     family: product.family,
                     price: Number(product.price || 0),
                     unitType: product.unitType || 'قطعة',
+                    imageUrl: product.imageUrl || '',
                     maxQty: cap,
                     qty: Math.min(qty, cap)
                 });

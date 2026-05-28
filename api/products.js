@@ -1,5 +1,6 @@
 import { getTursoClient, reduceChangelog } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
+import { productImageUrl } from './_lib/r2.js';
 
 /**
  * GET /api/products?family=<name>
@@ -42,6 +43,7 @@ export default async function handler(req, res) {
             if (familyFilter && family !== familyFilter) continue;
 
             const totalQty = Number(data.totalQuantity ?? 0);
+            const imageVersion = data.imageVersion ?? '';
             products.push({
                 uuid: recordUuid,
                 id: data.id ?? null,
@@ -51,7 +53,8 @@ export default async function handler(req, res) {
                 quantity: totalQty,
                 available: totalQty > 0,
                 unitType: data.unitType ?? 'قطعة',
-                imageVersion: data.imageVersion ?? '',
+                imageVersion,
+                imageUrl: imageVersion ? productImageUrl(recordUuid, imageVersion) : '',
                 barcode: data.barcode ?? ''
             });
         }
