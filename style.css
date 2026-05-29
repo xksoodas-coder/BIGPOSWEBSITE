@@ -292,15 +292,15 @@ img {
 /* ===== Categories Grid ===== */
 .categories-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 6px;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
 }
 
 .category-card {
     background-color: var(--bg-white);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 14px 10px;
+    padding: 6px 6px 8px;
     text-align: center;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -308,9 +308,8 @@ img {
     color: inherit;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-height: 130px;
+    align-items: stretch;
+    justify-content: flex-start;
 }
 
 .category-card:hover {
@@ -320,9 +319,9 @@ img {
 }
 
 .category-image {
-    width: 90px;
-    height: 70px;
-    margin-bottom: 10px;
+    width: 100%;
+    height: 120px;
+    margin-bottom: 6px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -332,9 +331,9 @@ img {
 }
 
 .category-image img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .category-placeholder {
@@ -350,24 +349,25 @@ img {
 }
 
 .category-name {
-    font-size: 14px;
+    font-size: 12.5px;
     font-weight: 600;
     color: var(--text-dark);
-    margin-top: 4px;
+    margin-top: 2px;
+    line-height: 1.2;
 }
 
 /* ===== Products Grid ===== */
 .products-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 18px;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 12px;
 }
 
 .product-card {
     background-color: var(--bg-white);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 14px;
+    padding: 8px 8px 10px;
     transition: all 0.2s ease;
     display: flex;
     flex-direction: column;
@@ -385,8 +385,8 @@ img {
 
 .product-image {
     width: 100%;
-    height: 140px;
-    margin-bottom: 12px;
+    height: 200px;
+    margin-bottom: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -396,9 +396,9 @@ img {
 }
 
 .product-image img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .product-image .category-placeholder {
@@ -406,15 +406,40 @@ img {
 }
 
 .product-name {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--text-dark);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     text-align: center;
-    min-height: 40px;
+    min-height: 20px;
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+/* ===== Favorite (heart) button ===== */
+.fav-btn {
+    position: absolute;
+    top: 8px;
+    inset-inline-end: 8px;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: var(--shadow-sm);
+    color: #cfcfcf;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 2;
+    transition: transform 0.12s ease, color 0.12s ease;
+}
+
+.fav-btn:hover { transform: scale(1.12); }
+
+.fav-btn.active {
+    color: #e0245e;
 }
 
 .product-price {
@@ -756,15 +781,69 @@ img {
     background-color: #2b2b2b;
     color: #d8d8d8;
     margin-top: auto;
-    padding: 40px 24px 20px;
+    padding: 22px 24px 14px;
+    font-size: 12px;
+}
+
+/* Reveal only when the user reaches the bottom of the page. */
+.main-footer.footer-reveal {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none;
+}
+
+.main-footer.footer-reveal.revealed {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
 }
 
 .footer-container {
     max-width: 1280px;
     margin: 0 auto;
     display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 20px;
+}
+
+/* Store-info block injected at the top of the footer. */
+.footer-store-info-block {
+    max-width: 1280px;
+    margin: 0 auto 18px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.footer-store-info-block h4 {
+    color: white;
+    font-size: 14px;
+    margin-bottom: 12px;
+    font-weight: 700;
+}
+
+.store-info-grid {
+    display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 28px;
+    gap: 6px 24px;
+}
+
+.store-info-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.store-info-row .si-key {
+    color: #9a9a9a;
+}
+
+.store-info-row .si-val {
+    color: #fff;
+    font-weight: 600;
+    text-align: end;
 }
 
 .footer-col h4 {
@@ -838,6 +917,73 @@ img {
 
 .customer-logout:hover {
     background-color: rgba(255, 255, 255, 0.32);
+}
+
+/* ===== Account button + debt dropdown ===== */
+.customer-info {
+    position: relative;
+}
+
+.account-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 0;
+}
+
+.account-btn .account-debt {
+    background-color: #e0245e;
+    color: white;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
+.account-btn .account-caret {
+    font-size: 10px;
+    opacity: 0.8;
+}
+
+.account-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    inset-inline-start: 0;
+    min-width: 220px;
+    background: white;
+    color: var(--text-dark);
+    border-radius: 10px;
+    box-shadow: var(--shadow-md);
+    padding: 10px 14px;
+    z-index: 950;
+}
+
+.account-dropdown .account-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 8px 0;
+    font-size: 13px;
+}
+
+.account-dropdown .account-row + .account-row {
+    border-top: 1px solid var(--border);
+}
+
+.account-dropdown .debt-remaining {
+    color: #d62828;
+    font-weight: 700;
+}
+
+.account-dropdown .debt-paid {
+    color: #2a9d3f;
+    font-weight: 700;
 }
 
 /* ===== Cart Sidebar ===== */
@@ -1073,13 +1219,13 @@ img {
     }
 
     .categories-grid {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-        gap: 12px;
+        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+        gap: 8px;
     }
 
     .products-grid {
-        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-        gap: 14px;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 10px;
     }
 
     .cart-section {

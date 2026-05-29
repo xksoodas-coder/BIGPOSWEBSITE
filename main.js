@@ -6,12 +6,14 @@
 document.addEventListener('DOMContentLoaded', async () => {
     applyThemeAndAnnouncement();
     if (!enforcePrivateAccess()) return;
+    injectChrome();
     updateCartBadge();
     wireSearchPanel();
     initCartSidebar();
     wireCartIcons();
     renderCustomerBadge();
     applyStoreBranding();
+    initFooterReveal();
 
     try {
         if (document.getElementById('categoriesGrid')) {
@@ -52,6 +54,26 @@ async function applyStoreBranding() {
         });
         document.title = info.name;
     }
+
+    // Fill the dedicated store-info block in the footer (if present).
+    const box = document.getElementById('footerStoreInfo');
+    if (box) {
+        const rows = [
+            ['اسم المحل', info.name],
+            ['النشاط', info.activity],
+            ['العنوان', info.address],
+            ['الهاتف 1', info.phone1],
+            ['الهاتف 2', info.phone2],
+            ['البريد', info.email],
+            ['RIB', info.rib]
+        ].filter(([, v]) => v && v.trim());
+
+        box.innerHTML = rows.length
+            ? rows.map(([k, v]) =>
+                `<div class="store-info-row"><span class="si-key">${escapeHtml(k)}</span><span class="si-val">${escapeHtml(v)}</span></div>`
+              ).join('')
+            : '<p class="muted">لا توجد معلومات للمحل بعد.</p>';
+    }
 }
 
 function makeBSFallback() {
@@ -69,7 +91,7 @@ function enforcePrivateAccess() {
     return false;
 }
 
-// ===== Customer "logged in as" badge =====
+// ===== Customer "logged in as" badge + account dropdown =====
 function renderCustomerBadge() {
     const session = BWS.getCustomerSession();
     if (!session) return;
@@ -79,8 +101,22 @@ function renderCustomerBadge() {
     const wrap = document.createElement('div');
     wrap.className = 'customer-info';
     wrap.innerHTML = `
-        <span class="customer-name">${escapeHtml(session.name || session.username)}</span>
+        <button class="account-btn" id="accountBtn" type="button">
+            <span class="customer-name">${escapeHtml(session.name || session.username)}</span>
+            <span class="account-debt" id="accountDebtInline" hidden></span>
+            <span class="account-caret">▾</span>
+        </button>
         <button class="customer-logout" id="customerLogoutBtn">خروج</button>
+        <div class="account-dropdown" id="accountDropdown" hidden>
+            <div class="account-row">
+                <span>الدين المتبقي</span>
+                <strong class="debt-remaining" id="ddRemaining">—</strong>
+            </div>
+            <div class="account-row">
+                <span>المبلغ المدفوع</span>
+                <strong class="debt-paid" id="ddPaid">—</strong>
+            </div>
+        </div>
     `;
     headerLeft.appendChild(wrap);
 
@@ -88,6 +124,78 @@ function renderCustomerBadge() {
         BWS.customerLogout();
         window.location.href = 'login.html';
     });
+
+    const accountBtn = document.getElementById('accountBtn');
+    const dropdown = document.getElementById('accountDropdown');
+    accountBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.hidden = !dropdown.hidden;
+    });
+    document.addEventListener('click', (e) => {
+        if (!wrap.contains(e.target)) dropdown.hidden = true;
+    });
+
+    // Load the balance and fill both the inline badge and the dropdown.
+    BWS.fetchAccount().then(acc => {
+        if (!acc || acc.available === false) return;
+        const inline = document.getElementById('accountDebtInline');
+        const ddR = document.getElementById('ddRemaining');
+        const ddP = document.getElementById('ddPaid');
+        ddR.textContent = BWS.formatPrice(acc.remaining || 0);
+        ddP.textContent = BWS.formatPrice(acc.paid || 0);
+        if ((acc.remaining || 0) > 0) {
+            inline.textContent = BWS.formatPrice(acc.remaining);
+            inline.hidden = false;
+        }
+    });
+}
+
+// ===== Inject shared chrome (favorites link + footer store-info block) =====
+function injectChrome() {
+    // 1. "المفضلة" link in the main nav.
+    const nav = document.querySelector('.main-nav');
+    if (nav && !nav.querySelector('.nav-favorites')) {
+        const a = document.createElement('a');
+        a.href = 'products.html?favorites=1';
+        a.className = 'nav-favorites';
+        a.textContent = '♥ المفضلة';
+        const params = new URLSearchParams(window.location.search);
+        if (/products\.html$/i.test(window.location.pathname) && params.get('favorites') === '1') {
+            a.classList.add('active');
+        }
+        nav.insertBefore(a, nav.firstChild);
+    }
+
+    // 2. Store-info block at the top of the footer.
+    const footerContainer = document.querySelector('.main-footer .footer-container');
+    if (footerContainer && !document.getElementById('footerStoreInfo')) {
+        const block = document.createElement('div');
+        block.className = 'footer-store-info-block';
+        block.innerHTML = `
+            <h4>معلومات المحل</h4>
+            <div id="footerStoreInfo" class="store-info-grid">
+                <p class="muted">…</p>
+            </div>
+        `;
+        const footer = document.querySelector('.main-footer');
+        footer.insertBefore(block, footerContainer);
+    }
+}
+
+// ===== Footer reveal (only at the bottom of the page) =====
+function initFooterReveal() {
+    const footer = document.querySelector('.main-footer');
+    if (!footer) return;
+    footer.classList.add('footer-reveal');
+
+    const check = () => {
+        const scrolledToBottom =
+            window.innerHeight + window.scrollY >= document.body.scrollHeight - 4;
+        footer.classList.toggle('revealed', scrolledToBottom);
+    };
+    window.addEventListener('scroll', check, { passive: true });
+    window.addEventListener('resize', check, { passive: true });
+    check();
 }
 
 // ===== Theme + Announcement bar =====
@@ -293,6 +401,7 @@ function renderImageOrPlaceholder(src, fallbackText) {
 // ===== Products Page =====
 async function renderProductsPage() {
     const params = new URLSearchParams(window.location.search);
+    const favoritesMode = params.get('favorites') === '1';
     const familyId = Number(params.get('familyId'));
 
     const titleEl = document.getElementById('productsPageTitle');
@@ -303,79 +412,145 @@ async function renderProductsPage() {
     titleEl.textContent = 'جاري التحميل...';
     subtitleEl.textContent = '';
 
-    const family = await BWS.getFamilyById(familyId);
-    if (!family) {
-        titleEl.textContent = 'تصنيف غير موجود';
-        subtitleEl.textContent = 'الرجاء اختيار تصنيف من قائمة التصنيفات';
-        emptyState.style.display = 'block';
-        return;
-    }
-
-    const hidden = new Set(BWS.getHiddenIds());
-    if (hidden.has(family.id)) {
-        titleEl.textContent = 'هذا التصنيف غير متاح';
-        subtitleEl.textContent = '';
-        emptyState.style.display = 'block';
-        return;
-    }
-
-    titleEl.textContent = family.name;
-    subtitleEl.textContent = 'منتجات التصنيف';
-
     let products;
-    try {
-        products = await BWS.fetchProductsForFamily(family.name);
-    } catch (err) {
-        titleEl.textContent = 'تعذّر تحميل المنتجات';
-        subtitleEl.textContent = err.message || '';
-        emptyState.style.display = 'block';
-        return;
-    }
 
-    if (products.length === 0) {
-        grid.style.display = 'none';
-        emptyState.style.display = 'block';
-        return;
+    if (favoritesMode) {
+        titleEl.textContent = 'منتجاتي المفضلة';
+        subtitleEl.textContent = 'المنتجات التي أضفتها للمفضلة';
+        try {
+            products = await BWS.fetchFavoriteProducts();
+        } catch (err) {
+            titleEl.textContent = 'تعذّر تحميل المفضلة';
+            subtitleEl.textContent = err.message || '';
+            emptyState.style.display = 'block';
+            return;
+        }
+        if (products.length === 0) {
+            grid.style.display = 'none';
+            emptyState.style.display = 'block';
+            emptyState.innerHTML = '<p>لا توجد منتجات في المفضلة بعد. اضغط على ♥ في أي منتج لإضافته.</p>';
+            return;
+        }
+    } else {
+        const family = await BWS.getFamilyById(familyId);
+        if (!family) {
+            titleEl.textContent = 'تصنيف غير موجود';
+            subtitleEl.textContent = 'الرجاء اختيار تصنيف من قائمة التصنيفات';
+            emptyState.style.display = 'block';
+            return;
+        }
+
+        const hidden = new Set(BWS.getHiddenIds());
+        if (hidden.has(family.id)) {
+            titleEl.textContent = 'هذا التصنيف غير متاح';
+            subtitleEl.textContent = '';
+            emptyState.style.display = 'block';
+            return;
+        }
+
+        titleEl.textContent = family.name;
+        subtitleEl.textContent = 'منتجات التصنيف';
+
+        try {
+            products = await BWS.fetchProductsForFamily(family.name);
+        } catch (err) {
+            titleEl.textContent = 'تعذّر تحميل المنتجات';
+            subtitleEl.textContent = err.message || '';
+            emptyState.style.display = 'block';
+            return;
+        }
+
+        if (products.length === 0) {
+            grid.style.display = 'none';
+            emptyState.style.display = 'block';
+            return;
+        }
     }
 
     grid.style.display = '';
     emptyState.style.display = 'none';
-    grid.innerHTML = products.map(p => {
-        const available = p.available && p.quantity > 0;
-        return `
-            <div class="product-card${available ? '' : ' unavailable'}" data-uuid="${escapeHtml(p.uuid)}">
-                <div class="product-image">
-                    ${renderImageOrPlaceholder(p.imageUrl, (p.name || '?').charAt(0))}
-                </div>
-                <div class="product-name">${escapeHtml(p.name)}</div>
-                <div class="product-price">${BWS.formatPrice(p.price)}</div>
-                <div class="product-status ${available ? 'status-available' : 'status-unavailable'}">
-                    ${available ? 'متاح' : 'غير متاح'}
-                </div>
-                <button class="add-cart-btn" ${available ? '' : 'hidden'}>
-                    إضافة إلى السلة
-                </button>
-            </div>
-        `;
-    }).join('');
+    grid.innerHTML = products.map(renderProductCard).join('');
+    wireProductCards(grid, products, favoritesMode);
+}
 
+function renderProductCard(p) {
+    const available = p.available && p.quantity > 0;
+    const fav = p.isFavorite ? ' active' : '';
+    return `
+        <div class="product-card${available ? '' : ' unavailable'}" data-uuid="${escapeHtml(p.uuid)}">
+            <button class="fav-btn${fav}" type="button" aria-label="مفضلة">♥</button>
+            <div class="product-image">
+                ${renderImageOrPlaceholder(p.imageUrl, (p.name || '?').charAt(0))}
+            </div>
+            <div class="product-name">${escapeHtml(p.name)}</div>
+            <div class="product-price">${BWS.formatPrice(p.price)}</div>
+            <div class="product-status ${available ? 'status-available' : 'status-unavailable'}">
+                ${available ? 'متاح' : 'غير متاح'}
+            </div>
+            <button class="add-cart-btn" ${available ? '' : 'hidden'}>
+                إضافة إلى السلة
+            </button>
+        </div>
+    `;
+}
+
+function wireProductCards(grid, products, favoritesMode) {
     const productByUuid = new Map(products.map(p => [p.uuid, p]));
     grid.querySelectorAll('.product-card').forEach(card => {
         const uuid = card.dataset.uuid;
-        const btn = card.querySelector('.add-cart-btn');
-        if (!btn) return;
-        btn.addEventListener('click', () => {
-            const product = productByUuid.get(uuid);
-            if (BWS.addToCart(product, 1)) {
-                updateCartBadge();
-                if (document.getElementById('cartSidebar')?.classList.contains('open')) {
-                    renderCartSidebar();
+
+        // Add to cart
+        const addBtn = card.querySelector('.add-cart-btn');
+        if (addBtn) {
+            addBtn.addEventListener('click', () => {
+                const product = productByUuid.get(uuid);
+                if (BWS.addToCart(product, 1)) {
+                    updateCartBadge();
+                    if (document.getElementById('cartSidebar')?.classList.contains('open')) {
+                        renderCartSidebar();
+                    }
+                    showToast('تمت إضافة المنتج إلى السلة');
+                } else {
+                    showToast('المنتج غير متاح');
                 }
-                showToast('تمت إضافة المنتج إلى السلة');
-            } else {
-                showToast('المنتج غير متاح');
-            }
-        });
+            });
+        }
+
+        // Favorite toggle
+        const favBtn = card.querySelector('.fav-btn');
+        if (favBtn) {
+            favBtn.addEventListener('click', async () => {
+                const product = productByUuid.get(uuid);
+                const willActivate = !favBtn.classList.contains('active');
+                favBtn.classList.toggle('active', willActivate);
+                if (product) product.isFavorite = willActivate;
+                try {
+                    if (willActivate) await BWS.addFavorite(uuid);
+                    else await BWS.removeFavorite(uuid);
+                } catch {
+                    // Revert on failure.
+                    favBtn.classList.toggle('active', !willActivate);
+                    if (product) product.isFavorite = !willActivate;
+                    showToast('تعذّر تحديث المفضلة');
+                    return;
+                }
+                if (willActivate) {
+                    showToast('أُضيف إلى المفضلة');
+                } else {
+                    showToast('أُزيل من المفضلة');
+                    // In favourites view, removing should drop the card.
+                    if (favoritesMode) {
+                        card.remove();
+                        if (!grid.querySelector('.product-card')) {
+                            const emptyState = document.getElementById('emptyState');
+                            grid.style.display = 'none';
+                            emptyState.style.display = 'block';
+                            emptyState.innerHTML = '<p>لا توجد منتجات في المفضلة بعد.</p>';
+                        }
+                    }
+                }
+            });
+        }
     });
 }
 

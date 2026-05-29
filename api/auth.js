@@ -60,9 +60,14 @@ export default async function handler(req, res) {
         }
 
         const sevenDays = 60 * 60 * 24 * 7;
+        // customerId is the desktop DB primary key — invoices/payments/added
+        // debts reference the customer by this number, so we carry it in the
+        // session to compute the account balance later.
+        const customerId = match.data.Id ?? match.data.CustomerId ?? null;
         const token = signSession({
             storeId: targetStore,
             customerUuid: match.recordUuid,
+            customerId,
             name: match.data.Name || match.data.WebUsername || '',
             phone: match.data.Phone || '',
             iat: Math.floor(Date.now() / 1000),

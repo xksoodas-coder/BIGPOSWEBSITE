@@ -160,11 +160,45 @@ const BWS = (function () {
             if (!force && _storeInfoCache) return _storeInfoCache;
             try {
                 const data = await apiFetch('/api/store', { method: 'GET' });
-                _storeInfoCache = { name: data.name || '', logoUrl: data.logoUrl || '' };
+                _storeInfoCache = {
+                    name: data.name || '',
+                    activity: data.activity || '',
+                    address: data.address || '',
+                    phone1: data.phone1 || '',
+                    phone2: data.phone2 || '',
+                    email: data.email || '',
+                    rib: data.rib || '',
+                    logoUrl: data.logoUrl || ''
+                };
             } catch {
-                _storeInfoCache = { name: '', logoUrl: '' };
+                _storeInfoCache = { name: '', activity: '', address: '', phone1: '', phone2: '', email: '', rib: '', logoUrl: '' };
             }
             return _storeInfoCache;
+        },
+
+        // ----- account balance (server) -----
+        async fetchAccount() {
+            try {
+                return await apiFetch('/api/account', { method: 'GET' });
+            } catch {
+                return { remaining: 0, paid: 0, available: false };
+            }
+        },
+
+        // ----- favorites (server) -----
+        async fetchFavorites() {
+            try {
+                const data = await apiFetch('/api/favorites', { method: 'GET' });
+                return data.uuids || [];
+            } catch {
+                return [];
+            }
+        },
+        async addFavorite(uuid) {
+            return await apiFetch('/api/favorites', { method: 'POST', body: { uuid } });
+        },
+        async removeFavorite(uuid) {
+            return await apiFetch('/api/favorites', { method: 'DELETE', body: { uuid } });
         },
 
         // ----- products (server) -----
@@ -175,6 +209,10 @@ const BWS = (function () {
                 { method: 'GET' }
             );
             _productsByFamily.set(familyName, data.products || []);
+            return data.products || [];
+        },
+        async fetchFavoriteProducts() {
+            const data = await apiFetch('/api/products?favorites=1', { method: 'GET' });
             return data.products || [];
         },
 
