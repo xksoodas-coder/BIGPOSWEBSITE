@@ -1200,7 +1200,11 @@ function renderCartPage() {
             const items = BWS.getCart().map(it => ({
                 uuid: it.uuid, id: it.id ?? null, name: it.name,
                 price: Number(it.price || 0), quantity: Number(it.qty || 0),
-                unitType: it.unitType || 'قطعة'
+                unitType: it.unitType || 'قطعة',
+                // تفصيل «الطلب بالأحجام» — كان يُسقَط هنا فتضيع الأحجام للزبون
+                // العابر (تظهر الكمية الإجمالية فقط عند تعديل الفاتورة).
+                unitQty: Number(it.unitQty) || 0,
+                sizes: Array.isArray(it.sizes) ? it.sizes : []
             }));
             const result = await BWS.submitGuestOrder({
                 items, name, phone, wilaya, baladiya, deliveryType, notes,
