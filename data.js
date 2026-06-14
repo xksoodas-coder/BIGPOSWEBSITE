@@ -321,7 +321,10 @@ const BWS = (function () {
                 _preloadedFamily = {
                     familyId: Number(data.products.familyId),
                     products: data.products.products,
-                    total: Number(data.products.total || 0)
+                    total: Number(data.products.total || 0),
+                    // true → this is the WHOLE family (paginate it in memory);
+                    // false/absent → only page 1 (fetch the rest from the server).
+                    complete: data.products.complete === true
                 };
             }
 

@@ -165,17 +165,24 @@ export default async function handler(req, res) {
                 const hideOOS = settings && settings.showOutOfStock === false;
                 let list = hideOOS ? catalog.filter(p => p.available) : catalog;
                 if (familyIdQ > 0) {
+                    // A category: return its WHOLE product list (not just page 1)
+                    // so the client paginates IN MEMORY on scroll — no per-page
+                    // network requests. Those sequential paged fetches (fired to
+                    // fill the viewport) were what made entering a category slow.
+                    // The payload stays small because it's a single family.
                     const fam = Array.isArray(families) ? families.find(f => f.id === familyIdQ) : null;
-                    list = fam ? list.filter(p => p.family === fam.name) : [];
+                    const flist = (fam ? list.filter(p => p.family === fam.name) : [])
+                        .map(p => ({ ...p, isFavorite: false }));
+                    products = { products: flist, total: flist.length, familyId: familyIdQ, size, complete: true };
+                } else {
+                    // All-products home: keep server pagination (it's the whole catalog).
+                    const total = list.length;
+                    const paged = list.slice(0, size).map(p => ({ ...p, isFavorite: false }));
+                    products = { products: paged, total };
                 }
-                const total = list.length;
-                const paged = list.slice(0, size).map(p => ({ ...p, isFavorite: false }));
-                products = familyIdQ > 0
-                    ? { products: paged, total, familyId: familyIdQ, size }
-                    : { products: paged, total };
             } catch {
                 products = familyIdQ > 0
-                    ? { products: [], total: 0, familyId: familyIdQ, size }
+                    ? { products: [], total: 0, familyId: familyIdQ, size, complete: true }
                     : { products: [], total: 0 };
             }
         }

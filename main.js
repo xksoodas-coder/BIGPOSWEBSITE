@@ -825,19 +825,9 @@ async function renderProductsPage() {
     titleEl.textContent = family.name;
     subtitleEl.textContent = 'منتجات التصنيف';
 
-    // Instant path: if the catalog was prefetched (idle/hover), render this
-    // family's products straight from the client cache — no network. The idle
-    // prefetch keeps it fresh; falls back to the paged server fetch otherwise.
-    let localItems = null;
-    try {
-        const cached = BWS.getCachedCatalog();
-        if (cached && cached.length) {
-            const items = cached.filter(p => p.family === family.name);
-            if (items.length) localItems = items;
-        }
-    } catch { /* ignore → server fetch */ }
-
-    await renderFamilyPaged(family, grid, emptyState, localItems);
+    // The whole category is preloaded by bootstrap (one request) and paginated
+    // in memory inside renderFamilyPaged — no per-page network round-trips.
+    await renderFamilyPaged(family, grid, emptyState);
 }
 
 // Category view: load page 1 immediately (with a skeleton placeholder), then
@@ -941,13 +931,17 @@ async function renderFamilyPaged(family, grid, emptyState, localItems = null) {
         observer.observe(sentinel);
     }
 
-    // Prefer the prefetched catalog (instant, local pagination); else the page
-    // bootstrap already preloaded (no extra request); else fetch the first page.
+    // Bootstrap preloads the whole category in one request → paginate it in
+    // memory here (instant, no per-page network). Older shapes that carry only
+    // page 1 (or an explicit localItems source) fall back to the paged fetch.
     if (localItems) {
         await loadNext();
     } else {
         const pre = BWS.takePreloadedFamilyPage(family.id);
-        if (pre) {
+        if (pre && pre.complete) {
+            localItems = pre.products;   // whole family → in-memory pagination
+            await loadNext();
+        } else if (pre) {
             total = pre.total;
             appendPage(pre.products);
         } else {
