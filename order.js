@@ -156,28 +156,74 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await applyBranding();
 
-    // ----- Load catalog (stale-while-revalidate) -----
-    // Paint instantly from the cached catalog when available, then revalidate
-    // in the background so switching products feels instant on later visits.
-    const cached = BWS.getCachedCatalog();
-    if (cached && cached.length) {
-        _allProducts = cached;
-        renderInitial();
-        if (!BWS.catalogIsFresh()) {
-            BWS.fetchCatalog({ force: true })
-                .then(fresh => { _allProducts = fresh; refreshAfterCatalog(); })
-                .catch(() => {});
-        }
-    } else {
-        try { _allProducts = await BWS.fetchCatalog({ force: true }); }
-        catch { _allProducts = []; }
-        renderInitial();
-    }
+    // ----- Load ONLY the selected product + the rest of its category -----
+    // The order page never needs the whole catalogue — only the chosen product,
+    // its in-category siblings (for "related" + instant switching) and the
+    // descriptions. Fetching just those replaces the multi-MB whole-catalog
+    // download that made this page slow (and time out) on big stores.
+    const selUuid = (new URLSearchParams(location.search).get('product') || '').trim();
+    await loadProductContext(selUuid);
+    renderInitial();
 
     // Client-side navigation: intercept related-product clicks + back/forward.
     bindRelatedNav();
     window.addEventListener('popstate', onPopState);
 });
+
+// Load the working set for one product: its category's products (for related +
+// switching) plus the product's own detail (price/stock/descriptions). Keeps
+// _allProducts scoped to the product's family instead of the entire store.
+async function loadProductContext(uuid) {
+    if (!uuid) { _allProducts = []; return; }
+
+    // The product's own detail also tells us its family + descriptions.
+    let detail = null;
+    try { detail = await BWS.fetchProductDetailCached(uuid); } catch { /* offline / 404 */ }
+
+    // The rest of the category — fully-shaped cards (id, prices, stock, sizes).
+    let familyItems = [];
+    const fam = detail && detail.family;
+    if (fam) {
+        try { familyItems = await BWS.fetchProductsForFamily(fam); } catch { /* keep just the detail */ }
+    }
+
+    _allProducts = Array.isArray(familyItems) ? familyItems.slice() : [];
+    const inList = _allProducts.find(p => p.uuid === uuid);
+    if (inList && detail) {
+        // Merge descriptions so enrichSelected paints badges with no extra fetch.
+        inList.shortDescription = detail.shortDescription || '';
+        inList.description = detail.description || '';
+        inList._enriched = true;
+    } else if (detail) {
+        // Selected product isn't in the family list (e.g. store hides out-of-stock
+        // items) → fall back to its own detail so the page can still render it.
+        _allProducts.unshift(normalizeDetail(detail));
+    }
+}
+
+// Shape a single-product /api/product detail like a catalog card so the order
+// page renderers (which expect catalog items) can use it interchangeably.
+function normalizeDetail(d) {
+    return {
+        uuid: d.uuid,
+        id: d.id ?? null,
+        name: d.name || '',
+        family: d.family || '',
+        price: Number(d.price ?? d.price1 ?? 0),
+        price1: Number(d.price1 ?? 0), price2: Number(d.price2 ?? 0),
+        price3: Number(d.price3 ?? 0), price4: Number(d.price4 ?? 0),
+        price5: Number(d.price5 ?? 0), price6: Number(d.price6 ?? 0),
+        price7: Number(d.price7 ?? 0),
+        quantity: Number(d.quantity ?? 0),
+        available: !!d.available,
+        unitType: d.unitType || 'قطعة',
+        imageUrl: d.imageUrl || '',
+        sizes: Array.isArray(d.sizes) ? d.sizes : [],
+        shortDescription: d.shortDescription || '',
+        description: d.description || '',
+        _enriched: true
+    };
+}
 
 // ---- Initial paint from the current ?product= in the URL ----
 let _initialRendered = false;
@@ -191,26 +237,15 @@ function renderInitial() {
     _initialRendered = true;
 }
 
-// ---- Background catalog refresh: update stock/price + related list only,
-// never the form the customer may be filling. ----
-function refreshAfterCatalog() {
-    if (_selectedProduct) {
-        const updated = _allProducts.find(p => p.uuid === _selectedProduct.uuid);
-        if (updated) {
-            updated.shortDescription = _selectedProduct.shortDescription;
-            updated.description = _selectedProduct.description;
-            updated._enriched = _selectedProduct._enriched;
-            _selectedProduct = updated;
-            const priceEl = document.querySelector('.order-product-price');
-            if (priceEl) priceEl.textContent = BWS.formatPrice(BWS.effectivePrice(updated));
-        }
-    }
-    renderRelatedProducts(_selectedProduct ? _selectedProduct.uuid : '');
-}
-
 // ---- Instant client-side switch to another product (no page reload) ----
-function selectProduct(uuid, { push = true } = {}) {
-    const p = _allProducts.find(x => x.uuid === uuid);
+async function selectProduct(uuid, { push = true } = {}) {
+    let p = _allProducts.find(x => x.uuid === uuid);
+    if (!p) {
+        // Product not in the current category set (e.g. navigating to a product
+        // from a different family) → load its context on demand, then retry.
+        await loadProductContext(uuid);
+        p = _allProducts.find(x => x.uuid === uuid);
+    }
     if (!p) return;
 
     const form = captureForm();        // keep what the customer already typed

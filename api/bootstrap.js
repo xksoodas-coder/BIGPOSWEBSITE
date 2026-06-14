@@ -95,22 +95,22 @@ export default async function handler(req, res) {
             return;
         }
 
-        // ----- 4. Store branding + families, batched -----
+        // ----- 4. Store branding + families -----
+        // Read independently (NOT one batch): turso_deleted_properties only
+        // exists once a property was deleted on a phone, and a missing table
+        // fails the whole batch — which used to silently null out the families
+        // here (so the client fell back to /api/categories, which 500'd too).
         let store = null;
         let families = null;
-        try {
-            const rb = await client.batch([
-                {
-                    sql: `SELECT company_name, activity, address, phone1, phone2, email, rib, logo_version
-                          FROM turso_store_info WHERE store_id = ? LIMIT 1`,
-                    args: [storeId]
-                },
-                { sql: `SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1`, args: [storeId] },
-                { sql: `SELECT json_payload FROM turso_deleted_properties WHERE store_id = ? LIMIT 1`, args: [storeId] }
-            ], 'read');
 
-            if (rb[0]?.rows?.length) {
-                const row = rb[0].rows[0];
+        try {
+            const r = await client.execute({
+                sql: `SELECT company_name, activity, address, phone1, phone2, email, rib, logo_version
+                      FROM turso_store_info WHERE store_id = ? LIMIT 1`,
+                args: [storeId]
+            });
+            if (r.rows.length) {
+                const row = r.rows[0];
                 const version = String(row.logo_version || '').trim();
                 store = {
                     name: String(row.company_name || '').trim(),
@@ -123,15 +123,28 @@ export default async function handler(req, res) {
                     logoUrl: version ? storeLogoUrl(storeId, version) : ''
                 };
             }
+        } catch { /* store info table may not exist yet */ }
 
-            // Flatten the families tree the same way /api/categories does —
-            // dropping tombstoned (phone-deleted) families so they don't
-            // resurrect on the storefront.
-            if (rb[1]?.rows?.length) {
-                const tombsJson = rb[2]?.rows?.length ? rb[2].rows[0].json_payload : null;
-                families = flattenFamilies(rb[1].rows[0].json_payload, tombsJson);
+        try {
+            const famRes = await client.execute({
+                sql: `SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1`,
+                args: [storeId]
+            });
+            if (famRes.rows.length) {
+                // Tombstones (phone-deleted families) — separate + tolerant of a
+                // missing table so it can never take the families down with it.
+                let tombsJson = null;
+                try {
+                    const tombRes = await client.execute({
+                        sql: `SELECT json_payload FROM turso_deleted_properties WHERE store_id = ? LIMIT 1`,
+                        args: [storeId]
+                    });
+                    if (tombRes.rows.length) tombsJson = tombRes.rows[0].json_payload;
+                } catch { /* no tombstones table yet */ }
+                try { families = flattenFamilies(famRes.rows[0].json_payload, tombsJson); }
+                catch { families = null; }
             }
-        } catch { /* store/families tables may not exist yet */ }
+        } catch { /* families table may not exist yet */ }
 
         // ----- 5. First products page — folds the category page's 2nd request
         // into this one. familyId → first page of that category; display=products

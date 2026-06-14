@@ -25,19 +25,33 @@ export default async function handler(req, res) {
         }
 
         const client = getTursoClient();
-        const rb = await client.batch([
-            { sql: 'SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1', args: [access.storeId] },
-            { sql: 'SELECT json_payload FROM turso_deleted_properties WHERE store_id = ? LIMIT 1', args: [access.storeId] }
-        ], 'read');
+        const famRes = await client.execute({
+            sql: 'SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1',
+            args: [access.storeId]
+        });
 
-        if (!rb[0]?.rows?.length) {
+        if (!famRes.rows.length) {
             res.status(200).json({ families: [] });
             return;
         }
 
-        const familiesJson = rb[0].rows[0].json_payload;
-        const tombsJson = rb[1]?.rows?.length ? rb[1].rows[0].json_payload : null;
-        const families = flattenFamilies(familiesJson, tombsJson);
+        // The tombstones table is created only once a property is deleted on a
+        // phone — on a store that never deleted one it doesn't exist yet. Reading
+        // it in the SAME batch as turso_families made a "no such table" error take
+        // the families down with it → 500 "تعذّر تحميل التصنيفات". Read it on its
+        // own and tolerate its absence.
+        let tombsJson = null;
+        try {
+            const tombRes = await client.execute({
+                sql: 'SELECT json_payload FROM turso_deleted_properties WHERE store_id = ? LIMIT 1',
+                args: [access.storeId]
+            });
+            if (tombRes.rows.length) tombsJson = tombRes.rows[0].json_payload;
+        } catch { /* table may not exist yet → no tombstones */ }
+
+        let families = [];
+        try { families = flattenFamilies(famRes.rows[0].json_payload, tombsJson); }
+        catch { families = []; }
 
         res.setHeader('Cache-Control', 'private, max-age=30');
         res.status(200).json({ families });

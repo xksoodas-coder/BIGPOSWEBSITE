@@ -42,7 +42,9 @@ export function flattenFamilies(familiesJson, tombstonesJson) {
     const families = [];
     let nextId = 1;
     const walk = (nodes, parentId, prefix) => {
+        if (!Array.isArray(nodes)) return;
         for (const node of nodes) {
+            if (!node || typeof node !== 'object') continue;
             const name = String(node.name || '').trim();
             const path = [...prefix, name];
             // Skip a deleted node AND its whole subtree.
