@@ -180,7 +180,48 @@ export default async function handler(req, res) {
             }
         }
 
-        res.status(200).json({ tenant: tenantOut, settings, access: true, store, families, products });
+        // ----- 6. Single product + its category — folds the ORDER page's two
+        // extra round-trips (/api/product + /api/products?family=) into this one
+        // request, the same way familyId folds the category page. Without this the
+        // order page ran bootstrap → product → family sequentially, each a
+        // separate (possibly cold-starting) serverless call → slow open. --------
+        let product = null;
+        let familyProducts = null;
+        const productQ = (req.query?.product || '').toString().trim();
+        if (productQ) {
+            try {
+                const catalog = await getCatalog(client, storeId);
+                const sel = catalog.find(p => p.uuid === productQ);
+                if (sel) {
+                    // Descriptions are website-only (not in the changelog/catalog).
+                    let shortDescription = '', description = '';
+                    try {
+                        const d = await client.execute({
+                            sql: `SELECT short_desc, full_desc FROM bws_product_descriptions
+                                  WHERE store_id = ? AND product_uuid = ?`,
+                            args: [storeId, productQ]
+                        });
+                        if (d.rows.length) {
+                            shortDescription = d.rows[0].short_desc || '';
+                            description = d.rows[0].full_desc || '';
+                        }
+                    } catch { /* descriptions table may not exist yet */ }
+
+                    product = { ...sel, isFavorite: false, shortDescription, description };
+
+                    // Same-family siblings for the "related" grid + instant switch.
+                    const hideOOS = settings && settings.showOutOfStock === false;
+                    let sibs = catalog.filter(p => p.family === sel.family);
+                    if (hideOOS) sibs = sibs.filter(p => p.available);
+                    familyProducts = sibs.map(p => ({ ...p, isFavorite: false }));
+                }
+            } catch { /* client falls back to the per-endpoint path */ }
+        }
+
+        res.status(200).json({
+            tenant: tenantOut, settings, access: true,
+            store, families, products, product, familyProducts
+        });
     } catch (err) {
         console.error('[bootstrap] error', err);
         res.status(500).json({ error: 'تعذّر تحميل المتجر' });

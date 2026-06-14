@@ -25,6 +25,9 @@ const BWS = (function () {
     // First page of a category, preloaded by bootstrap on products.html; consumed
     // once by renderFamilyPaged so the category page needs no extra request.
     let _preloadedFamily = null;
+    // Selected product + its category, preloaded by bootstrap on order.html;
+    // consumed once by order.js so the order page needs no extra requests.
+    let _preloadedProduct = null;
 
     // The storefront's tenant is derived from the link: a custom domain / a
     // subdomain (server reads Host) or, on the platform/preview host, a
@@ -292,12 +295,20 @@ const BWS = (function () {
         // resolve without further network. Best-effort: on any failure the caller
         // falls back to the per-endpoint path. Returns the raw payload or null.
         async bootstrap() {
-            // On a category page, ask the server for that category's first page
-            // too, so products.html needs no separate /api/products request.
+            // On a category page, ask for that category's first page too; on an
+            // order page, ask for the selected product + its category — so each
+            // page is served by this ONE request instead of extra round-trips.
             let famId = 0;
-            try { famId = Number(new URLSearchParams(location.search).get('familyId')) || 0; }
-            catch { famId = 0; }
-            const path = '/api/bootstrap' + (famId > 0 ? ('?familyId=' + famId) : '');
+            let productUuid = '';
+            try {
+                const sp = new URLSearchParams(location.search);
+                famId = Number(sp.get('familyId')) || 0;
+                productUuid = (sp.get('product') || '').trim();
+            } catch { /* keep defaults */ }
+            const qs = [];
+            if (famId > 0) qs.push('familyId=' + famId);
+            if (productUuid) qs.push('product=' + encodeURIComponent(productUuid));
+            const path = '/api/bootstrap' + (qs.length ? ('?' + qs.join('&')) : '');
 
             let data;
             try { data = await apiFetch(path, { method: 'GET' }); }
@@ -311,6 +322,15 @@ const BWS = (function () {
                     familyId: Number(data.products.familyId),
                     products: data.products.products,
                     total: Number(data.products.total || 0)
+                };
+            }
+
+            // Stash the preloaded product + its category for order.js to use.
+            if (data.product && data.product.uuid) {
+                _preloadedProduct = {
+                    uuid: data.product.uuid,
+                    product: data.product,
+                    familyProducts: Array.isArray(data.familyProducts) ? data.familyProducts : []
                 };
             }
 
@@ -349,6 +369,15 @@ const BWS = (function () {
             if (_preloadedFamily && _preloadedFamily.familyId === Number(familyId)) {
                 const p = _preloadedFamily;
                 _preloadedFamily = null;
+                return p;
+            }
+            return null;
+        },
+        // Consume (once) the product + its category preloaded by bootstrap.
+        takePreloadedProduct(uuid) {
+            if (_preloadedProduct && _preloadedProduct.uuid === uuid) {
+                const p = _preloadedProduct;
+                _preloadedProduct = null;
                 return p;
             }
             return null;

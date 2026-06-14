@@ -176,6 +176,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadProductContext(uuid) {
     if (!uuid) { _allProducts = []; return; }
 
+    // Fast path: BWS.bootstrap() already folded this product + its whole category
+    // into the single entry request → use it with ZERO extra round-trips.
+    const pre = BWS.takePreloadedProduct(uuid);
+    if (pre && pre.product) {
+        _allProducts = Array.isArray(pre.familyProducts) ? pre.familyProducts.slice() : [];
+        const inList = _allProducts.find(p => p.uuid === uuid);
+        if (inList) {
+            inList.shortDescription = pre.product.shortDescription || '';
+            inList.description = pre.product.description || '';
+            inList._enriched = true;
+        } else {
+            const sel = normalizeDetail(pre.product);
+            _allProducts.unshift(sel);
+        }
+        return;
+    }
+
     // The product's own detail also tells us its family + descriptions.
     let detail = null;
     try { detail = await BWS.fetchProductDetailCached(uuid); } catch { /* offline / 404 */ }
