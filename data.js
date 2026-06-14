@@ -535,7 +535,11 @@ const BWS = (function () {
         // pass { force: true } to always hit the network (background refresh).
         async fetchCatalog({ force = false } = {}) {
             if (!force && this.catalogIsFresh()) return this.getCachedCatalog();
-            const data = await apiFetch('/api/products?limit=1000&offset=0', { method: 'GET' });
+            // No limit → the server returns the WHOLE catalogue. The old
+            // `limit=1000` silently truncated stores with >1000 products, so big
+            // categories showed an incomplete list and the order page sometimes
+            // couldn't find a product whose name sorts past the first 1000.
+            const data = await apiFetch('/api/products', { method: 'GET' });
             return _writeCatalog(data.products || []);
         },
 

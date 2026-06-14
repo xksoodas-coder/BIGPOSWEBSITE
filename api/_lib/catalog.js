@@ -26,8 +26,14 @@ import { productImageUrl } from './r2.js';
  * bytes are valid for every customer of the tenant.
  */
 
-const CATALOG_TTL_MS = 60 * 1000; // rebuild the DB snapshot at most once/min per store
-const MEM_TTL_MS = 20 * 1000;     // serve a warm instance from RAM without any DB read
+const CATALOG_TTL_MS = 5 * 60 * 1000; // snapshot is "fresh" for 5 min; rebuilt at most once per window
+const MEM_TTL_MS = 60 * 1000;         // serve a warm instance from RAM without any DB read
+// While a rebuild may be running, other requests must NOT pile a second rebuild
+// on top (that "thundering herd" is what made every concurrent visitor trigger
+// its own full-changelog scan and time the function out → 504). The first
+// request to find the snapshot stale claims this lock and rebuilds; everyone
+// else serves the stale snapshot instantly until the lock clears or expires.
+const BUILD_LOCK_MS = 2 * 60 * 1000;
 
 // Per-instance parsed-catalog cache: storeId → { at, products }. Avoids reading
 // and re-parsing the (possibly multi-MB) snapshot row on every warm request.
@@ -44,8 +50,15 @@ export async function ensureCatalogInfra(client) {
     await client.execute(`CREATE TABLE IF NOT EXISTS bws_catalog_snapshot (
         store_id     TEXT PRIMARY KEY,
         products_json TEXT NOT NULL DEFAULT '[]',
-        updated_at   INTEGER NOT NULL DEFAULT 0
+        updated_at   INTEGER NOT NULL DEFAULT 0,
+        building_at  INTEGER NOT NULL DEFAULT 0
     )`);
+    // Add the rebuild-lock column to stores whose snapshot table predates it
+    // (CREATE ... IF NOT EXISTS won't alter an existing table). Idempotent:
+    // "duplicate column name" on already-migrated tables is expected → ignored.
+    try {
+        await client.execute(`ALTER TABLE bws_catalog_snapshot ADD COLUMN building_at INTEGER NOT NULL DEFAULT 0`);
+    } catch { /* column already exists */ }
     // The hot storefront query filters by (store_id, table_name) and orders by
     // timestamp. Without this composite index it scans every row of the store's
     // changelog (invoices, payments, ...) to find the Products rows.
@@ -206,11 +219,31 @@ export async function buildCatalog(client, storeId) {
     return products;
 }
 
+/** Persist a freshly built catalog and clear the rebuild lock. */
+async function writeSnapshot(client, storeId, products) {
+    await client.execute({
+        sql: `INSERT INTO bws_catalog_snapshot (store_id, products_json, updated_at, building_at)
+              VALUES (?, ?, ?, 0)
+              ON CONFLICT(store_id) DO UPDATE SET
+                  products_json = excluded.products_json,
+                  updated_at    = excluded.updated_at,
+                  building_at   = 0`,
+        args: [storeId, JSON.stringify(products), Date.now()]
+    });
+}
+
 /**
  * Return the store's catalog (array of shaped products) using the snapshot
- * cache. Rebuilds from the changelog only when the snapshot is missing or
- * older than CATALOG_TTL_MS. On a rebuild failure, falls back to the stale
- * snapshot rather than throwing.
+ * cache.
+ *
+ * The key property — and the fix for the 504s — is that a customer request is
+ * NEVER blocked on the heavy changelog rebuild when a snapshot already exists.
+ * When the snapshot is stale the snapshot is still returned IMMEDIATELY; the
+ * rebuild is done by a single request that wins a DB lock (so concurrent
+ * visitors don't each launch their own scan), and even that request falls back
+ * to the stale copy if its rebuild fails. Only the very first build for a brand
+ * new store (no snapshot at all) blocks — and that one is covered by the
+ * function's maxDuration budget.
  *
  * @param {object} [opts]
  * @param {boolean} [opts.force]  Always rebuild (e.g. right after a known write).
@@ -225,13 +258,15 @@ export async function getCatalog(client, storeId, { force = false } = {}) {
     await ensureCatalogInfra(client);
 
     let stale = null;
+    let buildingAt = 0;
     if (!force) {
         try {
             const r = await client.execute({
-                sql: `SELECT products_json, updated_at FROM bws_catalog_snapshot WHERE store_id = ?`,
+                sql: `SELECT products_json, updated_at, building_at FROM bws_catalog_snapshot WHERE store_id = ?`,
                 args: [storeId]
             });
             if (r.rows.length) {
+                buildingAt = Number(r.rows[0].building_at || 0);
                 const updatedAt = Number(r.rows[0].updated_at || 0);
                 const fresh = (Date.now() - updatedAt) < CATALOG_TTL_MS;
                 const parsed = JSON.parse(r.rows[0].products_json || '[]');
@@ -240,30 +275,52 @@ export async function getCatalog(client, storeId, { force = false } = {}) {
                         _memCatalog.set(storeId, { at: Date.now(), products: parsed });
                         return parsed;
                     }
-                    stale = parsed; // keep as a fallback if the rebuild fails
+                    stale = parsed; // serve this while (or instead of) rebuilding
                 }
             }
         } catch { /* snapshot unreadable → rebuild below */ }
     }
 
-    try {
-        const products = await buildCatalog(client, storeId);
+    // A stale snapshot exists → serve it without ever blocking the customer.
+    // Exactly one request (the lock winner) refreshes it in the background of
+    // the overall traffic; the rest return stale instantly.
+    if (stale) {
+        const lockHeld = buildingAt && (Date.now() - buildingAt) < BUILD_LOCK_MS;
+        if (lockHeld) {
+            _memCatalog.set(storeId, { at: Date.now(), products: stale });
+            return stale;
+        }
+        // Try to claim the rebuild lock (atomic: only one request wins).
+        let claimed = false;
         try {
-            await client.execute({
-                sql: `INSERT INTO bws_catalog_snapshot (store_id, products_json, updated_at)
-                      VALUES (?, ?, ?)
-                      ON CONFLICT(store_id) DO UPDATE SET
-                          products_json = excluded.products_json,
-                          updated_at    = excluded.updated_at`,
-                args: [storeId, JSON.stringify(products), Date.now()]
+            const upd = await client.execute({
+                sql: `UPDATE bws_catalog_snapshot SET building_at = ?
+                      WHERE store_id = ? AND (building_at = 0 OR building_at < ?)`,
+                args: [Date.now(), storeId, Date.now() - BUILD_LOCK_MS]
             });
-        } catch { /* snapshot write failed → still serve the fresh build */ }
-        _memCatalog.set(storeId, { at: Date.now(), products });
-        return products;
-    } catch (err) {
-        if (stale) return stale; // serve stale rather than error out
-        throw err;
+            claimed = Number(upd.rowsAffected || 0) > 0;
+        } catch { claimed = false; }
+        if (!claimed) {
+            _memCatalog.set(storeId, { at: Date.now(), products: stale });
+            return stale;
+        }
+        try {
+            const products = await buildCatalog(client, storeId);
+            await writeSnapshot(client, storeId, products);
+            _memCatalog.set(storeId, { at: Date.now(), products });
+            return products;
+        } catch {
+            // Rebuild failed → keep serving stale; the lock expires on its own.
+            _memCatalog.set(storeId, { at: Date.now(), products: stale });
+            return stale;
+        }
     }
+
+    // No snapshot at all (first ever build for this store, or force) → build now.
+    const products = await buildCatalog(client, storeId);
+    try { await writeSnapshot(client, storeId, products); } catch { /* still serve the build */ }
+    _memCatalog.set(storeId, { at: Date.now(), products });
+    return products;
 }
 
 export { CATALOG_TTL_MS };

@@ -1,13 +1,15 @@
 import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess } from './_lib/access.js';
-import { familyImageUrl } from './_lib/r2.js';
+import { flattenFamilies } from './_lib/families.js';
 
 /**
  * GET /api/categories
  * Auth: Bearer <session token>  (required — storeId comes from the token)
  *
  * Reads turso_families (one JSON blob per store_id) and flattens the tree
- * into a list the frontend can render directly.
+ * into a list the frontend can render directly. Families tombstoned in
+ * turso_deleted_properties are dropped (so phone-deleted families don't
+ * resurrect on the storefront when another device re-unions them).
  */
 export default async function handler(req, res) {
     if (req.method !== 'GET') {
@@ -23,41 +25,19 @@ export default async function handler(req, res) {
         }
 
         const client = getTursoClient();
-        const result = await client.execute({
-            sql: 'SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1',
-            args: [access.storeId]
-        });
+        const rb = await client.batch([
+            { sql: 'SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1', args: [access.storeId] },
+            { sql: 'SELECT json_payload FROM turso_deleted_properties WHERE store_id = ? LIMIT 1', args: [access.storeId] }
+        ], 'read');
 
-        if (result.rows.length === 0) {
+        if (!rb[0]?.rows?.length) {
             res.status(200).json({ families: [] });
             return;
         }
 
-        const raw = result.rows[0].json_payload;
-        let tree;
-        try { tree = JSON.parse(raw); } catch { tree = []; }
-
-        const families = [];
-        let nextId = 1;
-        const walk = (nodes, parentId) => {
-            for (const node of nodes) {
-                const id = nextId++;
-                const uuid = String(node.uuid || '').trim();
-                const imageVersion = String(node.imageVersion || '').trim();
-                families.push({
-                    id,
-                    parentId,
-                    name: String(node.name || '').trim(),
-                    uuid,
-                    imageVersion,
-                    imageUrl: (uuid && imageVersion) ? familyImageUrl(uuid, imageVersion) : ''
-                });
-                if (Array.isArray(node.children) && node.children.length > 0) {
-                    walk(node.children, id);
-                }
-            }
-        };
-        walk(Array.isArray(tree) ? tree : [], null);
+        const familiesJson = rb[0].rows[0].json_payload;
+        const tombsJson = rb[1]?.rows?.length ? rb[1].rows[0].json_payload : null;
+        const families = flattenFamilies(familiesJson, tombsJson);
 
         res.setHeader('Cache-Control', 'private, max-age=30');
         res.status(200).json({ families });

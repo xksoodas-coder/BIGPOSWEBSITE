@@ -53,21 +53,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         showToast(err.message || 'تعذّر تحميل البيانات');
     }
 
-    // Warm the full catalog in the background (when the browser is idle) so that
-    // opening a category afterwards renders instantly from the client cache.
-    schedulePrefetchCatalog();
+    // NOTE: the storefront no longer bulk-prefetches the whole catalogue here.
+    // It used to fire GET /api/products?limit=1000 on every page load, which (a)
+    // doubled the server's catalog work, (b) timed out (504) on big stores, and
+    // (c) capped at 1000 products. Category pages now open from the bootstrap
+    // preload (page 1) + paged server fetches, which are complete and reliable.
 });
-
-// Prefetch the catalog on idle (or a short timeout where requestIdleCallback is
-// unavailable, e.g. Safari). Deduped + best-effort inside prefetchCatalog().
-function schedulePrefetchCatalog() {
-    const run = () => { try { BWS.prefetchCatalog(); } catch { /* ignore */ } };
-    if ('requestIdleCallback' in window) {
-        requestIdleCallback(run, { timeout: 3000 });
-    } else {
-        setTimeout(run, 1200);
-    }
-}
 
 // ===== Store branding (logo + name in header/footer) =====
 async function applyStoreBranding() {
@@ -570,12 +561,6 @@ async function renderCategoriesGrid() {
             <div class="category-name">${escapeHtml(f.name)}</div>
         </a>`;
     }).join('');
-
-    // Predictive prefetch: the moment the customer's pointer/finger reaches the
-    // categories, warm the catalog so the category they click opens instantly.
-    const warm = () => BWS.prefetchCatalog();
-    grid.addEventListener('pointerover', warm, { once: true, passive: true });
-    grid.addEventListener('touchstart', warm, { once: true, passive: true });
 }
 
 // Href to the CURRENT categories page (index.html / categories.html) carrying a

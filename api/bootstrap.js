@@ -2,7 +2,8 @@ import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
 import { resolveTenant } from './_lib/tenant.js';
 import { getCatalog } from './_lib/catalog.js';
-import { familyImageUrl, storeLogoUrl } from './_lib/r2.js';
+import { storeLogoUrl } from './_lib/r2.js';
+import { flattenFamilies } from './_lib/families.js';
 
 /**
  * GET /api/bootstrap?display=products&limit=&offset=
@@ -104,7 +105,8 @@ export default async function handler(req, res) {
                           FROM turso_store_info WHERE store_id = ? LIMIT 1`,
                     args: [storeId]
                 },
-                { sql: `SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1`, args: [storeId] }
+                { sql: `SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1`, args: [storeId] },
+                { sql: `SELECT json_payload FROM turso_deleted_properties WHERE store_id = ? LIMIT 1`, args: [storeId] }
             ], 'read');
 
             if (rb[0]?.rows?.length) {
@@ -122,27 +124,12 @@ export default async function handler(req, res) {
                 };
             }
 
-            // Flatten the families tree the same way /api/categories does.
+            // Flatten the families tree the same way /api/categories does —
+            // dropping tombstoned (phone-deleted) families so they don't
+            // resurrect on the storefront.
             if (rb[1]?.rows?.length) {
-                let tree = [];
-                try { tree = JSON.parse(rb[1].rows[0].json_payload); } catch { tree = []; }
-                families = [];
-                let nextId = 1;
-                const walk = (nodes, parentId) => {
-                    for (const node of nodes) {
-                        const id = nextId++;
-                        const uuid = String(node.uuid || '').trim();
-                        const imageVersion = String(node.imageVersion || '').trim();
-                        families.push({
-                            id, parentId,
-                            name: String(node.name || '').trim(),
-                            uuid, imageVersion,
-                            imageUrl: (uuid && imageVersion) ? familyImageUrl(uuid, imageVersion) : ''
-                        });
-                        if (Array.isArray(node.children) && node.children.length > 0) walk(node.children, id);
-                    }
-                };
-                walk(Array.isArray(tree) ? tree : [], null);
+                const tombsJson = rb[2]?.rows?.length ? rb[2].rows[0].json_payload : null;
+                families = flattenFamilies(rb[1].rows[0].json_payload, tombsJson);
             }
         } catch { /* store/families tables may not exist yet */ }
 
