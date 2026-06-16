@@ -1,6 +1,6 @@
 import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess } from './_lib/access.js';
-import { productImageUrl } from './_lib/r2.js';
+import { productImageUrl, productImageUrlLegacy } from './_lib/r2.js';
 
 /**
  * GET /api/product?uuid=<recordUuid>
@@ -106,7 +106,8 @@ export default async function handler(req, res) {
             available: qty > 0,
             unitType: full.unitType ?? 'قطعة',
             family: (full.family || '').toString().trim(),
-            imageUrl: imageVersion ? productImageUrl(uuid, imageVersion) : ''
+            imageUrl: imageVersion ? productImageUrl(access.storeId, uuid, imageVersion) : '',
+            imageUrlLegacy: imageVersion ? productImageUrlLegacy(uuid, imageVersion) : ''
         });
     } catch (err) {
         console.error('[product] error', err);

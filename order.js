@@ -59,7 +59,8 @@ function productImageOrPlaceholder(src, opts = {}) {
         const attrs = opts.lazy
             ? 'loading="lazy" decoding="async"'
             : 'fetchpriority="high" decoding="async"';
-        return `<img src="${escapeHtml(src)}" alt="" ${attrs} onerror="this.replaceWith(makeProductPlaceholder())">`;
+        const fb = (opts.legacy && opts.legacy !== src) ? ` data-fb="${escapeHtml(opts.legacy)}"` : '';
+        return `<img src="${escapeHtml(src)}" alt="" ${attrs}${fb} onerror="if(this.dataset.fb){var u=this.dataset.fb;this.removeAttribute('data-fb');this.src=u;}else{this.replaceWith(makeProductPlaceholder());}">`;
     }
     return `<div class="product-placeholder">${PRODUCT_BOX_SVG}</div>`;
 }
@@ -68,9 +69,10 @@ function productImageOrPlaceholder(src, opts = {}) {
 // gray box; the real image (data-img) is loaded afterwards, near the viewport,
 // by hydrateThumbs(). The hero image stays eager (high priority) — only these
 // secondary thumbnails are deferred.
-function deferredThumb(src) {
+function deferredThumb(src, legacy) {
     const data = src ? ` data-img="${escapeHtml(src)}"` : '';
-    return `<div class="related-card-img"${data}><div class="product-placeholder">${PRODUCT_BOX_SVG}</div></div>`;
+    const dataFb = (src && legacy && legacy !== src) ? ` data-img-fb="${escapeHtml(legacy)}"` : '';
+    return `<div class="related-card-img"${data}${dataFb}><div class="product-placeholder">${PRODUCT_BOX_SVG}</div></div>`;
 }
 
 function hydrateThumbs(root) {
@@ -80,13 +82,16 @@ function hydrateThumbs(root) {
 
     const swap = (box) => {
         const src = box.getAttribute('data-img');
+        const fb = box.getAttribute('data-img-fb');
         box.removeAttribute('data-img');
+        box.removeAttribute('data-img-fb');
         if (!src) return;
         const img = new Image();
         img.alt = '';
         img.decoding = 'async';
         img.onload = () => { box.innerHTML = ''; box.appendChild(img); box.classList.add('img-ready'); };
-        img.onerror = () => { /* keep the gray placeholder */ };
+        let triedFb = false;
+        img.onerror = () => { if (fb && !triedFb) { triedFb = true; img.src = fb; return; } };
         img.src = src;
     };
 
@@ -235,6 +240,7 @@ function normalizeDetail(d) {
         available: !!d.available,
         unitType: d.unitType || 'قطعة',
         imageUrl: d.imageUrl || '',
+        imageUrlLegacy: d.imageUrlLegacy || '',
         sizes: Array.isArray(d.sizes) ? d.sizes : [],
         shortDescription: d.shortDescription || '',
         description: d.description || '',
@@ -459,7 +465,7 @@ function renderOrderPage() {
         <!-- Right column: product image -->
         <div class="order-right-col">
             <div class="order-product-image">
-                ${productImageOrPlaceholder(p.imageUrl)}
+                ${productImageOrPlaceholder(p.imageUrl, { legacy: p.imageUrlLegacy })}
             </div>
         </div>
     `;
@@ -566,7 +572,6 @@ function bindSummaryToggle() {
 function bindQtyControls() {
     const p = _selectedProduct;
     if (!p) return;
-    const cap = Number(p.quantity || 0);
     const valEl = document.getElementById('qtyValue');
     const decBtn = document.getElementById('qtyDec');
     const incBtn = document.getElementById('qtyInc');
@@ -580,10 +585,7 @@ function bindQtyControls() {
     });
 
     incBtn.addEventListener('click', () => {
-        if (_currentQty >= cap) {
-            showToast('لا توجد كمية أكبر متاحة');
-            return;
-        }
+        // كمية غير محدودة — لا تقييد بالمخزون المتوفر.
         _currentQty++;
         valEl.textContent = _currentQty;
         updateSummary();
@@ -746,7 +748,7 @@ function renderRelatedProducts(excludeUuid) {
         const href = withStore('order.html?product=' + encodeURIComponent(p.uuid));
         return `
             <a class="related-card" href="${escapeHtml(href)}" data-uuid="${escapeHtml(p.uuid)}">
-                ${deferredThumb(p.imageUrl)}
+                ${deferredThumb(p.imageUrl, p.imageUrlLegacy)}
                 <div class="related-card-body">
                     <div class="related-card-name">${escapeHtml(p.name)}</div>
                     <div class="related-card-price">${BWS.formatPrice(price)}</div>

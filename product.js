@@ -46,8 +46,11 @@ function makeProductPlaceholder() {
     return div;
 }
 window.makeProductPlaceholder = makeProductPlaceholder;
-function productImageOrPlaceholder(src) {
-    if (src) return `<img src="${escapeHtml(src)}" alt="" onerror="this.replaceWith(makeProductPlaceholder())">`;
+function productImageOrPlaceholder(src, legacy) {
+    if (src) {
+        const fb = (legacy && legacy !== src) ? ` data-fb="${escapeHtml(legacy)}"` : '';
+        return `<img src="${escapeHtml(src)}" alt=""${fb} onerror="if(this.dataset.fb){var u=this.dataset.fb;this.removeAttribute('data-fb');this.src=u;}else{this.replaceWith(makeProductPlaceholder());}">`;
+    }
     return `<div class="product-placeholder">${PRODUCT_BOX_SVG}</div>`;
 }
 function bulletsHtml(text) {
@@ -125,7 +128,7 @@ function renderProduct(p, direct) {
 
     page.innerHTML = `
         <div class="pd-top">
-            <div class="pd-image">${productImageOrPlaceholder(p.imageUrl)}</div>
+            <div class="pd-image">${productImageOrPlaceholder(p.imageUrl, p.imageUrlLegacy)}</div>
             <div class="pd-info">
                 <h1 class="pd-name">${escapeHtml(p.name)}</h1>
                 <div class="pd-price">${BWS.formatPrice(price)}</div>

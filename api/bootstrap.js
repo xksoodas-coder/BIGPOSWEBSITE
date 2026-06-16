@@ -141,7 +141,7 @@ export default async function handler(req, res) {
                     });
                     if (tombRes.rows.length) tombsJson = tombRes.rows[0].json_payload;
                 } catch { /* no tombstones table yet */ }
-                try { families = flattenFamilies(famRes.rows[0].json_payload, tombsJson); }
+                try { families = flattenFamilies(storeId, famRes.rows[0].json_payload, tombsJson); }
                 catch { families = null; }
             }
         } catch { /* families table may not exist yet */ }

@@ -415,7 +415,7 @@ function renderCartSidebar() {
         container.innerHTML = items.map(it => `
             <div class="sidebar-item" data-uuid="${escapeHtml(it.uuid)}">
                 <div class="sidebar-item-img">
-                    ${renderProductImageOrPlaceholder(it.imageUrl || null)}
+                    ${renderProductImageOrPlaceholder(it.imageUrl || null, it.imageUrlLegacy || null)}
                 </div>
                 <div class="sidebar-item-info">
                     <h4>${escapeHtml(it.name)}</h4>
@@ -556,7 +556,7 @@ async function renderCategoriesGrid() {
         return `
         <a href="${href}" class="category-card">
             <div class="category-image">
-                ${renderImageOrPlaceholder(f.imageUrl || null, f.name.charAt(0))}
+                ${renderImageOrPlaceholder(f.imageUrl || null, f.imageUrlLegacy || null)}
             </div>
             <div class="category-name">${escapeHtml(f.name)}</div>
         </a>`;
@@ -670,9 +670,18 @@ function makeCategoryPlaceholder() {
 }
 window.makeCategoryPlaceholder = makeCategoryPlaceholder;
 
-function renderImageOrPlaceholder(src) {
+// عند فشل تحميل الصورة من مسار المتجر: جرّب المسار القديم (data-fb) مرّة، وإلا placeholder.
+function bwsImgFallback(img, makePlaceholder) {
+    const fb = img.getAttribute('data-fb');
+    if (fb) { img.removeAttribute('data-fb'); img.src = fb; return; }
+    img.replaceWith(makePlaceholder());
+}
+window.bwsImgFallback = bwsImgFallback;
+
+function renderImageOrPlaceholder(src, fallback) {
     if (src) {
-        return `<img src="${escapeHtml(src)}" alt="" loading="lazy" decoding="async" onerror="this.replaceWith(makeCategoryPlaceholder())">`;
+        const fb = (fallback && fallback !== src) ? ` data-fb="${escapeHtml(fallback)}"` : '';
+        return `<img src="${escapeHtml(src)}" alt="" loading="lazy" decoding="async"${fb} onerror="bwsImgFallback(this, makeCategoryPlaceholder)">`;
     }
     return `<div class="category-placeholder">${CATEGORY_BOX_SVG}</div>`;
 }
@@ -684,9 +693,10 @@ const PRODUCT_BOX_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 // Cart glyph for the per-product "add to cart" icon button.
 const CART_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>';
 
-function renderProductImageOrPlaceholder(src) {
+function renderProductImageOrPlaceholder(src, fallback) {
     if (src) {
-        return `<img src="${escapeHtml(src)}" alt="" loading="lazy" decoding="async" onerror="this.replaceWith(makeProductPlaceholder())">`;
+        const fb = (fallback && fallback !== src) ? ` data-fb="${escapeHtml(fallback)}"` : '';
+        return `<img src="${escapeHtml(src)}" alt="" loading="lazy" decoding="async"${fb} onerror="bwsImgFallback(this, makeProductPlaceholder)">`;
     }
     return `<div class="product-placeholder">${PRODUCT_BOX_SVG}</div>`;
 }
@@ -704,9 +714,11 @@ window.makeProductPlaceholder = makeProductPlaceholder;
 // on the container's data-img and is loaded only AFTER the cards are on screen,
 // near the viewport. So a category opens fast (all product text/prices) and the
 // images stream in progressively as the customer reads/scrolls.
-function renderDeferredProductImage(src) {
+function renderDeferredProductImage(src, fallback) {
     const data = src ? ` data-img="${escapeHtml(src)}"` : '';
-    return `<div class="product-image"${data}><div class="product-placeholder">${PRODUCT_BOX_SVG}</div></div>`;
+    const dataFb = (src && fallback && fallback !== src)
+        ? ` data-img-fb="${escapeHtml(fallback)}"` : '';
+    return `<div class="product-image"${data}${dataFb}><div class="product-placeholder">${PRODUCT_BOX_SVG}</div></div>`;
 }
 
 function hydrateProductImages(root) {
@@ -716,7 +728,9 @@ function hydrateProductImages(root) {
 
     const swap = (box) => {
         const src = box.getAttribute('data-img');
+        const fb = box.getAttribute('data-img-fb');
         box.removeAttribute('data-img');
+        box.removeAttribute('data-img-fb');
         if (!src) return;
         const img = new Image();
         img.alt = '';
@@ -726,7 +740,11 @@ function hydrateProductImages(root) {
             box.appendChild(img);
             box.classList.add('img-ready');
         };
-        img.onerror = () => { /* keep the gray placeholder */ };
+        let triedFb = false;
+        img.onerror = () => {
+            // فشل مسار المتجر → جرّب القديم مرّة واحدة، وإلا أبقِ الـ placeholder.
+            if (fb && !triedFb) { triedFb = true; img.src = fb; return; }
+        };
         img.src = src;
     };
 
@@ -977,7 +995,7 @@ function renderProductCard(p) {
         <div class="product-card${available ? '' : ' unavailable'}" data-uuid="${escapeHtml(p.uuid)}">
             ${favBtn}
             <a class="product-link" href="${orderUrl}">
-                ${renderDeferredProductImage(p.imageUrl)}
+                ${renderDeferredProductImage(p.imageUrl, p.imageUrlLegacy)}
                 <div class="product-name">${escapeHtml(p.name)}</div>
             </a>
             <div class="product-price">${BWS.formatPrice(BWS.effectivePrice(p))}</div>
@@ -1101,7 +1119,7 @@ function renderCartPage() {
     container.innerHTML = cart.map(item => `
         <div class="cart-item" data-uuid="${escapeHtml(item.uuid)}">
             <div class="cart-item-image">
-                ${renderProductImageOrPlaceholder(item.imageUrl || null)}
+                ${renderProductImageOrPlaceholder(item.imageUrl || null, item.imageUrlLegacy || null)}
             </div>
             <div class="cart-item-info">
                 <h4>${escapeHtml(item.name)}</h4>
@@ -1351,7 +1369,6 @@ function wireSizeEdit(row, uuid, rerender) {
 
 function showSizeOrderDialog(product, initial) {
     return new Promise((resolve) => {
-        const cap = Number(product.quantity) || 0;
         const initSizes = (initial && Array.isArray(initial.sizes)) ? initial.sizes : [];
         const initQtyOf = (name) => {
             const m = initSizes.find(s => s.name === name);
@@ -1415,7 +1432,7 @@ function showSizeOrderDialog(product, initial) {
             let total = unitQty;
             sizes.forEach((s) => total += s.qty * s.capacity);
             if (total <= 0) { showToast('أدخل كمية'); return; }
-            if (total > cap) { showToast('الكمية تتجاوز المتوفر (' + cap + ')'); return; }
+            // كمية غير محدودة — لا تقييد بالمخزون المتوفر (طلب قد يفوق المتوفر).
             const chosen = sizes.filter(s => s.qty > 0)
                 .map(s => ({ name: s.name, capacity: s.capacity, qty: s.qty }));
             close({ total, unitQty, sizes: chosen });

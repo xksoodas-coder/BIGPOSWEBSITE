@@ -606,7 +606,9 @@ const BWS = (function () {
             const existing = cart.find(it => it.uuid === product.uuid);
             const cap = Number(product.quantity);
             if (existing) {
-                existing.qty = Math.min(existing.qty + qty, cap);
+                // كمية غير محدودة: لا نقيّدها بالمخزون (الطلب قد يفوق المتوفر
+                // فيُعالَج كطلبية COMMANDE). كما لا نكشف كمية المخزون للزبون.
+                existing.qty = existing.qty + qty;
             } else {
                 const prices = this.productTierPrices(product);
                 const tier = this.currentTier();
@@ -620,8 +622,9 @@ const BWS = (function () {
                     price: this.priceForTier(prices, tier),
                     unitType: product.unitType || 'قطعة',
                     imageUrl: product.imageUrl || '',
+                    imageUrlLegacy: product.imageUrlLegacy || '',
                     maxQty: cap,
-                    qty: Math.min(qty, cap),
+                    qty: qty,
                     // Available sizes for this product → lets the cart offer size editing.
                     allSizes: Array.isArray(product.sizes) ? product.sizes : []
                 });
@@ -647,6 +650,7 @@ const BWS = (function () {
                 price: this.priceForTier(prices, tier),
                 unitType: product.unitType || 'قطعة',
                 imageUrl: product.imageUrl || '',
+                imageUrlLegacy: product.imageUrlLegacy || '',
                 maxQty: Number(product.quantity),
                 qty: totalQty,
                 unitQty: Number(unitQty) || 0,
@@ -686,8 +690,8 @@ const BWS = (function () {
             const cart = getCart();
             const item = cart.find(it => it.uuid === uuid);
             if (!item) return;
-            const cap = Number(item.maxQty || 9999);
-            item.qty = Math.max(1, Math.min(qty, cap));
+            // كمية غير محدودة — لا تقييد بالمخزون المتوفر.
+            item.qty = Math.max(1, Number(qty) || 1);
             setCart(cart);
         },
 

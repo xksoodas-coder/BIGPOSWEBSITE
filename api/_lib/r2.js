@@ -14,7 +14,15 @@ function clean(base) {
     return base.replace(/\/+$/, '');
 }
 
-export function productImageUrl(productUuid, version = '') {
+// ─── المنتجات (حسب المتجر) ───
+export function productImageUrl(storeId, productUuid, version = '') {
+    if (!storeId || !productUuid) return '';
+    const v = version ? `?v=${encodeURIComponent(version)}` : '';
+    return `${clean(R2_PUBLIC_BASE)}/products/${storeId}/${productUuid}.jpg${v}`;
+}
+
+/// المسار القديم المسطّح — للاحتياطي (onerror) أثناء الانتقال.
+export function productImageUrlLegacy(productUuid, version = '') {
     if (!productUuid) return '';
     const v = version ? `?v=${encodeURIComponent(version)}` : '';
     return `${clean(R2_PUBLIC_BASE)}/products/${productUuid}.jpg${v}`;
@@ -26,7 +34,15 @@ export function storeLogoUrl(storeId, version = '') {
     return `${clean(R2_PUBLIC_BASE)}/logos/${storeId}.jpg${v}`;
 }
 
-export function familyImageUrl(familyUuid, version = '') {
+// ─── العائلات (حسب المتجر) ───
+export function familyImageUrl(storeId, familyUuid, version = '') {
+    if (!storeId || !familyUuid) return '';
+    const v = version ? `?v=${encodeURIComponent(version)}` : '';
+    return `${clean(R2_PUBLIC_BASE)}/families/${storeId}/${familyUuid}.jpg${v}`;
+}
+
+/// المسار القديم المسطّح للعائلة — للاحتياطي (onerror).
+export function familyImageUrlLegacy(familyUuid, version = '') {
     if (!familyUuid) return '';
     const v = version ? `?v=${encodeURIComponent(version)}` : '';
     return `${clean(R2_PUBLIC_BASE)}/families/${familyUuid}.jpg${v}`;

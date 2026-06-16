@@ -1,5 +1,5 @@
 import { getTursoClient } from './turso.js';
-import { productImageUrl } from './r2.js';
+import { productImageUrl, productImageUrlLegacy } from './r2.js';
 
 /**
  * Shared catalog layer (server-side).
@@ -209,7 +209,8 @@ export async function buildCatalog(client, storeId) {
             available: totalQty > 0,
             unitType: data.unitType ?? 'قطعة',
             imageVersion,
-            imageUrl: imageVersion ? productImageUrl(recordUuid, imageVersion) : '',
+            imageUrl: imageVersion ? productImageUrl(storeId, recordUuid, imageVersion) : '',
+            imageUrlLegacy: imageVersion ? productImageUrlLegacy(recordUuid, imageVersion) : '',
             barcode: data.barcode ?? '',
             sizes: sizesByUuid[recordUuid] || []
         });

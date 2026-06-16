@@ -1,4 +1,4 @@
-import { familyImageUrl } from './r2.js';
+import { familyImageUrl, familyImageUrlLegacy } from './r2.js';
 
 // Separator used by the mobile app's property tombstone keys
 // (product_properties_service.dart `_tombSep`).
@@ -24,7 +24,7 @@ const TOMB_SEP = '~@~';
  * @param {string} [tombstonesJson] json_payload from turso_deleted_properties
  * @returns {Array<{id:number,parentId:number|null,name:string,uuid:string,imageVersion:string,imageUrl:string}>}
  */
-export function flattenFamilies(familiesJson, tombstonesJson) {
+export function flattenFamilies(storeId, familiesJson, tombstonesJson) {
     let tree = [];
     try { tree = JSON.parse(familiesJson); } catch { tree = []; }
     if (!Array.isArray(tree)) tree = [];
@@ -58,7 +58,8 @@ export function flattenFamilies(familiesJson, tombstonesJson) {
                 name,
                 uuid,
                 imageVersion,
-                imageUrl: (uuid && imageVersion) ? familyImageUrl(uuid, imageVersion) : ''
+                imageUrl: (uuid && imageVersion) ? familyImageUrl(storeId, uuid, imageVersion) : '',
+                imageUrlLegacy: (uuid && imageVersion) ? familyImageUrlLegacy(uuid, imageVersion) : ''
             });
             if (Array.isArray(node.children) && node.children.length > 0) {
                 walk(node.children, id, path);

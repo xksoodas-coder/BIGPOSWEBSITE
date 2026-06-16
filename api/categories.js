@@ -50,7 +50,7 @@ export default async function handler(req, res) {
         } catch { /* table may not exist yet → no tombstones */ }
 
         let families = [];
-        try { families = flattenFamilies(famRes.rows[0].json_payload, tombsJson); }
+        try { families = flattenFamilies(access.storeId, famRes.rows[0].json_payload, tombsJson); }
         catch { families = []; }
 
         res.setHeader('Cache-Control', 'private, max-age=30');
