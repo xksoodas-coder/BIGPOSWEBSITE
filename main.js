@@ -327,25 +327,25 @@ function wireSearchPanel() {
         if (input) input.focus();
     });
     close?.addEventListener('click', () => panel.classList.remove('open'));
-    input?.addEventListener('keydown', async (e) => {
+
+    // البحث يبحث عن المنتجات مباشرةً: ينتقل لصفحة المنتجات بوسم بحث ?q=.
+    const submitSearch = () => {
+        const q = (input?.value || '').trim();
+        if (!q) { input?.focus(); return; }
+        window.location.href = withTenant('products.html?q=' + encodeURIComponent(q));
+    };
+
+    // الضغط على أيقونة البحث: يفتح اللوحة، وإن كانت مفتوحة وبها نص يبدأ البحث.
+    btn.addEventListener('click', () => {
+        if (panel.classList.contains('open') && (input?.value || '').trim()) {
+            submitSearch();
+        }
+    });
+
+    input?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
-            const q = input.value.trim().toLowerCase();
-            if (!q) return;
-            try {
-                const families = await BWS.getVisibleFamilies();
-                const match = families.find(f => f.name.toLowerCase().includes(q));
-                if (match) {
-                    // A family with sub-families opens them; a leaf opens products.
-                    const hasKids = families.some(f => f.parentId === match.id);
-                    window.location.href = hasKids
-                        ? withTenant('categories.html?parent=' + match.id)
-                        : withTenant('products.html?familyId=' + match.id);
-                } else {
-                    showToast('لم يتم العثور على نتائج.');
-                }
-            } catch (err) {
-                showToast(err.message || 'خطأ في البحث');
-            }
+            e.preventDefault();
+            submitSearch();
         } else if (e.key === 'Escape') {
             panel.classList.remove('open');
         }
@@ -783,6 +783,13 @@ async function renderProductsPage() {
     const grid = document.getElementById('productsGrid');
     const emptyState = document.getElementById('emptyState');
 
+    // ----- بحث المنتجات: ?q=term → يفلتر الكتالوج بالاسم/الباركود/العائلة -----
+    const searchQuery = (params.get('q') || '').trim();
+    if (searchQuery) {
+        await renderSearchResults(searchQuery, titleEl, subtitleEl, grid, emptyState);
+        return;
+    }
+
     // ----- Favourites: small set, load all at once (unchanged) -----
     if (favoritesMode) {
         titleEl.textContent = 'منتجاتي المفضلة';
@@ -846,6 +853,48 @@ async function renderProductsPage() {
     // The whole category is preloaded by bootstrap (one request) and paginated
     // in memory inside renderFamilyPaged — no per-page network round-trips.
     await renderFamilyPaged(family, grid, emptyState);
+}
+
+// نتائج بحث المنتجات: يجلب الكتالوج كاملًا ويفلتره بالاسم/الباركود/العائلة.
+async function renderSearchResults(query, titleEl, subtitleEl, grid, emptyState) {
+    const q = query.toLowerCase();
+    titleEl.textContent = 'نتائج البحث';
+    subtitleEl.textContent = `بحث عن: «${query}»`;
+    grid.style.display = '';
+    emptyState.style.display = 'none';
+    grid.innerHTML = loadingHtml();
+
+    let catalog;
+    try {
+        catalog = await BWS.fetchCatalog();
+    } catch (err) {
+        grid.innerHTML = '';
+        grid.style.display = 'none';
+        emptyState.style.display = 'block';
+        emptyState.innerHTML = `<p>${escapeHtml(err.message || 'تعذّر تنفيذ البحث')}</p>`;
+        return;
+    }
+
+    const products = (catalog || []).filter(p => {
+        const name = (p.name || '').toLowerCase();
+        const barcode = (p.barcode || '').toLowerCase();
+        const family = (p.family || '').toLowerCase();
+        return name.includes(q) || barcode.includes(q) || family.includes(q);
+    });
+
+    if (products.length === 0) {
+        grid.innerHTML = '';
+        grid.style.display = 'none';
+        emptyState.style.display = 'block';
+        emptyState.innerHTML = '<p>لم يتم العثور على منتجات مطابقة.</p>';
+        return;
+    }
+
+    subtitleEl.textContent = `${products.length} نتيجة لـ «${query}»`;
+    grid.innerHTML = products.map(renderProductCard).join('');
+    wireProductCards(grid, products, false);
+    setupPriceTierBar(products, grid, false);
+    deferHydrate(grid);
 }
 
 // Category view: load page 1 immediately (with a skeleton placeholder), then
@@ -983,8 +1032,11 @@ function renderProductCard(p) {
             ? `<a class="add-cart-btn order-btn" href="${orderUrl}">اضغط هنا للطلب</a>`
             : `<span class="add-cart-btn order-btn unavailable-btn">غير متاح</span>`)
         : '';
+    // عندما يكون زر السلة هو الزر الوحيد المعروض (الطلب مخفي) نعرضه عريضًا مع
+    // نص بدل أيقونة صغيرة فقط، حتى يكون واضحًا وكبيرًا.
+    const cartOnly = vis.cart && !vis.order;
     const cartIconBtn = (vis.cart && available)
-        ? `<button class="cart-icon-btn" type="button" aria-label="إضافة إلى السلة" title="إضافة إلى السلة">${CART_SVG}</button>`
+        ? `<button class="cart-icon-btn${cartOnly ? ' cart-icon-btn--wide' : ''}" type="button" aria-label="إضافة إلى السلة" title="إضافة إلى السلة">${CART_SVG}${cartOnly ? '<span>إضافة إلى السلة</span>' : ''}</button>`
         : '';
     // Heart overlays the image (top-left corner); shown per the audience setting.
     const favBtn = vis.fav
@@ -1124,7 +1176,7 @@ function renderCartPage() {
             <div class="cart-item-info">
                 <h4>${escapeHtml(item.name)}</h4>
                 <div class="item-price">${BWS.formatPrice(item.price)}${priceArrowHtml(item)}</div>
-                <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(item.family || '')}</div>
+                <div style="font-size:12px;color:var(--text-muted)">${escapeHtml(BWS.displayFamilies(item.family))}</div>
                 ${sizeEditHtml(item)}
             </div>
             <div class="qty-controls">

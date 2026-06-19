@@ -394,7 +394,8 @@
 .order-product-image img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    /* الصورة كاملة دون قص الأطراف. */
+    object-fit: contain;
     transform-origin: center center;
     transition: transform 0.18s ease-out;
 }
@@ -507,7 +508,7 @@
 .related-card-img img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     transition: transform 0.3s ease;
 }
 
@@ -589,7 +590,8 @@
 
     .order-product-image {
         max-width: 100%;
-        aspect-ratio: 4 / 3;
+        /* مربّع على الهاتف أيضًا بدل 4/3 الذي كان يقصّ الصورة. */
+        aspect-ratio: 1 / 1;
     }
 
     .order-product-title {

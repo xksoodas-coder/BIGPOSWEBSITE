@@ -717,15 +717,16 @@ function renderRelatedProducts(excludeUuid) {
     const section = document.getElementById('orderRelatedSection');
     if (!container || !section) return;
 
-    // Show the rest of the products from the SAME category (family) as the
-    // selected product, excluding the one currently displayed. No limit.
-    const family = _selectedProduct && _selectedProduct.family;
+    // Show the rest of the products that SHARE any family with the selected
+    // product, excluding the one currently displayed. No limit. (A product may
+    // belong to several families packed into `family` as "A~@~B".)
+    const selFamilies = BWS.splitFamilies(_selectedProduct && _selectedProduct.family);
     let related = [];
-    if (family) {
+    if (selFamilies.length) {
         related = _allProducts.filter(p =>
             p.uuid !== excludeUuid &&
             p.available && p.quantity > 0 &&
-            p.family === family
+            BWS.splitFamilies(p.family).some(f => selFamilies.includes(f))
         );
     }
 

@@ -320,7 +320,8 @@ img {
 
 .category-image {
     width: 100%;
-    height: 120px;
+    /* مربّع دائمًا مهما تغيّر عرض الهاتف (بدل ارتفاع ثابت يصير مستطيلًا). */
+    aspect-ratio: 1 / 1;
     margin-bottom: 6px;
     display: flex;
     align-items: center;
@@ -333,7 +334,8 @@ img {
 .category-image img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    /* تُعرض الصورة كاملة دون قص. */
+    object-fit: contain;
 }
 
 .category-placeholder {
@@ -424,7 +426,8 @@ img {
 .product-image img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    /* تُعرض صورة المنتج كاملة داخل المربّع دون قص الأطراف. */
+    object-fit: contain;
 }
 
 /* Fade the deferred image in once it loads (two-phase: text first, image after). */
@@ -608,6 +611,18 @@ img {
 }
 .cart-icon-btn:hover { background-color: var(--primary-dark); transform: scale(1.04); }
 .cart-icon-btn svg { width: 18px; height: 18px; }
+
+/* زر السلة عندما يكون الزر الوحيد: عريض وكبير مع نص. */
+.cart-icon-btn.cart-icon-btn--wide {
+    flex: 1 1 auto;
+    width: 100%;
+    gap: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-weight: 700;
+}
+.cart-icon-btn.cart-icon-btn--wide:hover { transform: none; }
+.cart-icon-btn.cart-icon-btn--wide svg { width: 20px; height: 20px; }
 
 /* Clickable product image + name → product detail page. */
 a.product-link {

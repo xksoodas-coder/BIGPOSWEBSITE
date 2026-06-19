@@ -261,6 +261,20 @@ const BWS = (function () {
     }
 
     return {
+        // A product may belong to several families packed into the single
+        // `family` string with the '~@~' separator (e.g. "A~@~B"). Split into the
+        // list of names, and a comma-joined display string.
+        splitFamilies(family) {
+            if (!family) return [];
+            const out = [];
+            for (const raw of String(family).split('~@~')) {
+                const name = raw.trim();
+                if (name && !out.includes(name)) out.push(name);
+            }
+            return out;
+        },
+        displayFamilies(family) { return this.splitFamilies(family).join('، '); },
+
         // ----- settings -----
         getSettings,
         setSettings,

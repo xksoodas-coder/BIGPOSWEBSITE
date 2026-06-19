@@ -4,6 +4,19 @@ import { familyImageUrl, familyImageUrlLegacy } from './r2.js';
 // (product_properties_service.dart `_tombSep`).
 const TOMB_SEP = '~@~';
 
+// A product may belong to several families, packed into the single `family`
+// string with the same `~@~` separator (e.g. "A~@~B"). Split it into the list
+// of family names (trimmed, de-duplicated, blanks dropped).
+export function splitFamilies(family) {
+    if (!family) return [];
+    const out = [];
+    for (const raw of String(family).split(TOMB_SEP)) {
+        const name = raw.trim();
+        if (name && !out.includes(name)) out.push(name);
+    }
+    return out;
+}
+
 /**
  * Flatten a `turso_families` JSON tree into the flat list the storefront
  * renders, DROPPING any node tombstoned as deleted ('d') in

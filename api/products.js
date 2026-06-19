@@ -1,6 +1,7 @@
 import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess, getStoreSettings } from './_lib/access.js';
 import { getCatalog } from './_lib/catalog.js';
+import { splitFamilies } from './_lib/families.js';
 
 /**
  * GET /api/products?family=<name>&favorites=1&limit=&offset=
@@ -61,7 +62,9 @@ export default async function handler(req, res) {
         const products = [];
         for (const p of catalog) {
             if (hideOOS && !p.available) continue;
-            if (familyFilter && p.family !== familyFilter) continue;
+            // المنتج قد يحمل عدّة عائلات محزومة في `family` ("A~@~B")؛ نطابق
+            // الاحتواء بدل التطابق التام ليظهر تحت كلٍّ من عائلاته.
+            if (familyFilter && !splitFamilies(p.family).includes(familyFilter)) continue;
             const isFavorite = favSet.has(p.uuid);
             if (favoritesOnly && !isFavorite) continue;
             products.push(isFavorite ? { ...p, isFavorite } : { ...p, isFavorite: false });
