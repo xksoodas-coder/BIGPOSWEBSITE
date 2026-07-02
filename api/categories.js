@@ -1,6 +1,5 @@
-import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess } from './_lib/access.js';
-import { flattenFamilies } from './_lib/families.js';
+import { getSupabaseFamilies } from './_lib/supabase.js';
 
 /**
  * GET /api/categories
@@ -24,34 +23,10 @@ export default async function handler(req, res) {
             return;
         }
 
-        const client = getTursoClient();
-        const famRes = await client.execute({
-            sql: 'SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1',
-            args: [access.storeId]
-        });
-
-        if (!famRes.rows.length) {
-            res.status(200).json({ families: [] });
-            return;
-        }
-
-        // The tombstones table is created only once a property is deleted on a
-        // phone — on a store that never deleted one it doesn't exist yet. Reading
-        // it in the SAME batch as turso_families made a "no such table" error take
-        // the families down with it → 500 "تعذّر تحميل التصنيفات". Read it on its
-        // own and tolerate its absence.
-        let tombsJson = null;
-        try {
-            const tombRes = await client.execute({
-                sql: 'SELECT json_payload FROM turso_deleted_properties WHERE store_id = ? LIMIT 1',
-                args: [access.storeId]
-            });
-            if (tombRes.rows.length) tombsJson = tombRes.rows[0].json_payload;
-        } catch { /* table may not exist yet → no tombstones */ }
-
+        // Families — read only from Supabase.
         let families = [];
-        try { families = flattenFamilies(access.storeId, famRes.rows[0].json_payload, tombsJson); }
-        catch { families = []; }
+        try { families = await getSupabaseFamilies(access.storeId); }
+        catch (e) { console.error('[categories] supabase error:', e?.message || e); families = []; }
 
         res.setHeader('Cache-Control', 'private, max-age=30');
         res.status(200).json({ families });

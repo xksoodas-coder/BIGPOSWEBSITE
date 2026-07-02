@@ -1,10 +1,8 @@
 import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
 import { resolveTenant } from './_lib/tenant.js';
-import { getCatalog } from './_lib/catalog.js';
-import { getStoreCatalog, getSupabaseFamilies, supabaseEnabledFor } from './_lib/supabase.js';
+import { getSupabaseCatalog, getSupabaseFamilies } from './_lib/supabase.js';
 import { storeLogoUrl } from './_lib/r2.js';
-import { flattenFamilies } from './_lib/families.js';
 import { buyerPricing, projectProductPrices } from './_lib/pricing.js';
 
 /**
@@ -40,44 +38,16 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-store');
 
     // ----- 0. Keep-warm heartbeat -------------------------------------------
-    // GET /api/bootstrap?warmup=1  — pinged by an external cron (~every 10 min)
-    // so nothing goes fully cold: it warms the Turso connection, this serverless
-    // instance, and each configured store's catalog snapshot (the heaviest op).
-    // Folded into bootstrap instead of its own file to stay under the Hobby-plan
-    // 12-serverless-function limit. Public + read-only, so it needs no auth.
+    // GET /api/bootstrap?warmup=1  — pinged by an external cron so the Turso
+    // connection (still used for orders/customers/settings) and this serverless
+    // instance don't go cold. Products/families now come from Supabase (no cold
+    // start) so there is nothing catalog-related to warm. Public + read-only.
     if (String(req.query?.warmup || '') === '1') {
         const t0 = Date.now();
         try {
             const client = getTursoClient();
             await client.execute('SELECT 1');
-            // Which store(s) to warm the catalog snapshot for:
-            //   1. an explicit ?store=<id,id> list (overrides everything), else
-            //   2. the WARMUP_STORE_IDS env allow-list, else
-            //   3. the store resolved from THIS request's host — so pinging
-            //      haithemstore.bigsoft.top warms *haithemstore's* catalog.
-            // Read-only, so it needs no auth (safe to bypass the tenant gate).
-            let ids = (req.query?.store || '').toString()
-                .split(',').map(s => s.trim()).filter(Boolean);
-            if (ids.length === 0) {
-                ids = (process.env.WARMUP_STORE_IDS || '')
-                    .split(',').map(s => s.trim()).filter(Boolean);
-            }
-            if (ids.length === 0) {
-                const tenant = await resolveTenant(req).catch(() => null);
-                if (tenant && tenant.storeId) ids = [tenant.storeId];
-            }
-            ids = [...new Set(ids)];
-            const warmed = [];
-            for (const storeId of ids) {
-                const tC = Date.now();
-                try {
-                    const catalog = await getCatalog(client, storeId);
-                    warmed.push({ storeId, products: catalog.length, ms: Date.now() - tC });
-                } catch (e) {
-                    warmed.push({ storeId, error: String(e?.message || e), ms: Date.now() - tC });
-                }
-            }
-            res.status(200).json({ ok: true, warmed, total_ms: Date.now() - t0 });
+            res.status(200).json({ ok: true, total_ms: Date.now() - t0 });
         } catch (err) {
             res.status(200).json({ ok: false, error: String(err?.message || err), total_ms: Date.now() - t0 });
         }
@@ -177,33 +147,9 @@ export default async function handler(req, res) {
             }
         } catch { /* store info table may not exist yet */ }
 
-        // Supabase-switched stores read families from Supabase; on any error we
-        // fall through to the Turso families read so the storefront never breaks.
-        let familiesLoaded = false;
-        if (supabaseEnabledFor(storeId)) {
-            try { families = await getSupabaseFamilies(storeId); familiesLoaded = true; }
-            catch (e) { console.error('[families] supabase failed, falling back to turso:', e?.message || e); }
-        }
-        if (!familiesLoaded) try {
-            const famRes = await client.execute({
-                sql: `SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1`,
-                args: [storeId]
-            });
-            if (famRes.rows.length) {
-                // Tombstones (phone-deleted families) — separate + tolerant of a
-                // missing table so it can never take the families down with it.
-                let tombsJson = null;
-                try {
-                    const tombRes = await client.execute({
-                        sql: `SELECT json_payload FROM turso_deleted_properties WHERE store_id = ? LIMIT 1`,
-                        args: [storeId]
-                    });
-                    if (tombRes.rows.length) tombsJson = tombRes.rows[0].json_payload;
-                } catch { /* no tombstones table yet */ }
-                try { families = flattenFamilies(storeId, famRes.rows[0].json_payload, tombsJson); }
-                catch { families = null; }
-            }
-        } catch { /* families table may not exist yet */ }
+        // Families — read only from Supabase.
+        try { families = await getSupabaseFamilies(storeId); }
+        catch (e) { console.error('[families] supabase error:', e?.message || e); families = null; }
 
         // ----- 5. First products page — folds the category page's 2nd request
         // into this one. familyId → first page of that category; display=products
@@ -219,7 +165,7 @@ export default async function handler(req, res) {
             ps = (Number.isFinite(ps) && ps > 0) ? Math.min(200, Math.floor(ps)) : 25;
             const size = familyIdQ > 0 ? Math.max(12, ps) : ps;
             try {
-                const catalog = await getStoreCatalog(client, storeId);
+                const catalog = await getSupabaseCatalog(storeId);
                 // Hide out-of-stock items when the store opted to (lighter payload).
                 const hideOOS = settings && settings.showOutOfStock === false;
                 let list = hideOOS ? catalog.filter(p => p.available) : catalog;
@@ -256,7 +202,7 @@ export default async function handler(req, res) {
         const productQ = (req.query?.product || '').toString().trim();
         if (productQ) {
             try {
-                const catalog = await getStoreCatalog(client, storeId);
+                const catalog = await getSupabaseCatalog(storeId);
                 const sel = catalog.find(p => p.uuid === productQ);
                 if (sel) {
                     // Descriptions are website-only (not in the changelog/catalog).

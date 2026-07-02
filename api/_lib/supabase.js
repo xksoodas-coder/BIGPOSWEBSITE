@@ -1,6 +1,5 @@
 import { productImageUrl, productImageUrlLegacy } from './r2.js';
 import { familyImageUrl, familyImageUrlLegacy } from './r2.js';
-import { getCatalog } from './catalog.js';
 
 /**
  * Supabase read layer (server-side only).
@@ -30,35 +29,6 @@ function sbConfig() {
     const key = process.env.SUPABASE_SERVICE_KEY;
     if (!url || !key) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY must be set');
     return { url: url.replace(/\/+$/, ''), key };
-}
-
-/**
- * Per-store rollout switch. A store reads products/families from Supabase only
- * when Supabase is configured AND its store_id is listed in SUPABASE_STORES
- * (comma-separated). Everything else stays on Turso. This lets us cut over one
- * store at a time (start with NAILMO) and roll back instantly by editing the env.
- */
-export function supabaseEnabledFor(storeId) {
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) return false;
-    const list = (process.env.SUPABASE_STORES || '')
-        .split(',').map((s) => s.trim()).filter(Boolean);
-    return list.includes('*') || list.includes(storeId);
-}
-
-/**
- * Unified catalog getter: Supabase when the store is switched over (with an
- * automatic fall back to the Turso catalog on any Supabase error, so the
- * storefront never breaks), otherwise the Turso catalog.
- */
-export async function getStoreCatalog(client, storeId) {
-    if (supabaseEnabledFor(storeId)) {
-        try {
-            return await getSupabaseCatalog(storeId);
-        } catch (e) {
-            console.error('[catalog] supabase failed, falling back to turso:', e?.message || e);
-        }
-    }
-    return getCatalog(client, storeId);
 }
 
 async function sbGet(path) {

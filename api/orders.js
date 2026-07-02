@@ -2,7 +2,7 @@ import { randomUUID, createHash, createHmac } from 'node:crypto';
 import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
 import { resolveStoreAccess, getStoreSettings } from './_lib/access.js';
-import { getCatalog } from './_lib/catalog.js';
+import { getSupabaseCatalog } from './_lib/supabase.js';
 import { clientIp, isRateLimited, recordFailure } from './_lib/ratelimit.js';
 
 // حدّ إنشاء الطلبات لكل IP (نافذة 10 دقائق) — يمنع إغراق المتجر بطلبات.
@@ -211,7 +211,7 @@ export default async function handler(req, res) {
             // ─────────────────────────────────────────────────────────────
             let catalog;
             try {
-                catalog = await getCatalog(client, storeId);
+                catalog = await getSupabaseCatalog(storeId);
             } catch {
                 res.status(503).json({ error: 'تعذّر التحقق من الأسعار. حاول مرة أخرى.' });
                 return;
