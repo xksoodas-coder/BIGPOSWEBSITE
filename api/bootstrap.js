@@ -2,6 +2,7 @@ import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
 import { resolveTenant } from './_lib/tenant.js';
 import { getCatalog } from './_lib/catalog.js';
+import { getStoreCatalog, getSupabaseFamilies, supabaseEnabledFor } from './_lib/supabase.js';
 import { storeLogoUrl } from './_lib/r2.js';
 import { flattenFamilies } from './_lib/families.js';
 import { buyerPricing, projectProductPrices } from './_lib/pricing.js';
@@ -176,7 +177,14 @@ export default async function handler(req, res) {
             }
         } catch { /* store info table may not exist yet */ }
 
-        try {
+        // Supabase-switched stores read families from Supabase; on any error we
+        // fall through to the Turso families read so the storefront never breaks.
+        let familiesLoaded = false;
+        if (supabaseEnabledFor(storeId)) {
+            try { families = await getSupabaseFamilies(storeId); familiesLoaded = true; }
+            catch (e) { console.error('[families] supabase failed, falling back to turso:', e?.message || e); }
+        }
+        if (!familiesLoaded) try {
             const famRes = await client.execute({
                 sql: `SELECT json_payload FROM turso_families WHERE store_id = ? LIMIT 1`,
                 args: [storeId]
@@ -211,7 +219,7 @@ export default async function handler(req, res) {
             ps = (Number.isFinite(ps) && ps > 0) ? Math.min(200, Math.floor(ps)) : 25;
             const size = familyIdQ > 0 ? Math.max(12, ps) : ps;
             try {
-                const catalog = await getCatalog(client, storeId);
+                const catalog = await getStoreCatalog(client, storeId);
                 // Hide out-of-stock items when the store opted to (lighter payload).
                 const hideOOS = settings && settings.showOutOfStock === false;
                 let list = hideOOS ? catalog.filter(p => p.available) : catalog;
@@ -248,7 +256,7 @@ export default async function handler(req, res) {
         const productQ = (req.query?.product || '').toString().trim();
         if (productQ) {
             try {
-                const catalog = await getCatalog(client, storeId);
+                const catalog = await getStoreCatalog(client, storeId);
                 const sel = catalog.find(p => p.uuid === productQ);
                 if (sel) {
                     // Descriptions are website-only (not in the changelog/catalog).

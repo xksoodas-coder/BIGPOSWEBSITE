@@ -1,6 +1,6 @@
 import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess, getStoreSettings } from './_lib/access.js';
-import { getCatalog } from './_lib/catalog.js';
+import { getStoreCatalog } from './_lib/supabase.js';
 import { splitFamilies } from './_lib/families.js';
 import { buyerPricing, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
 
@@ -62,8 +62,8 @@ export default async function handler(req, res) {
         const gt = session ? 1 : await guestPriceTier(client, storeId);
         const { allowed, pricePerProduct } = buyerPricing(session, gt);
 
-        // Whole catalogue (shaped, snapshot-cached) → apply the request filters.
-        const catalog = await getCatalog(client, storeId);
+        // Whole catalogue (Supabase when switched over, else Turso snapshot).
+        const catalog = await getStoreCatalog(client, storeId);
         const products = [];
         for (const p of catalog) {
             if (hideOOS && !p.available) continue;
