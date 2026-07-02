@@ -38,6 +38,36 @@ export default async function handler(req, res) {
     // Depends on Host / ?store= / Authorization — never share across tenants.
     res.setHeader('Cache-Control', 'no-store');
 
+    // ----- 0. Keep-warm heartbeat -------------------------------------------
+    // GET /api/bootstrap?warmup=1  — pinged by an external cron (~every 10 min)
+    // so nothing goes fully cold: it warms the Turso connection, this serverless
+    // instance, and each configured store's catalog snapshot (the heaviest op).
+    // Folded into bootstrap instead of its own file to stay under the Hobby-plan
+    // 12-serverless-function limit. Public + read-only, so it needs no auth.
+    if (String(req.query?.warmup || '') === '1') {
+        const t0 = Date.now();
+        try {
+            const client = getTursoClient();
+            await client.execute('SELECT 1');
+            const ids = (process.env.WARMUP_STORE_IDS || '')
+                .split(',').map(s => s.trim()).filter(Boolean);
+            const warmed = [];
+            for (const storeId of ids) {
+                const tC = Date.now();
+                try {
+                    const catalog = await getCatalog(client, storeId);
+                    warmed.push({ storeId, products: catalog.length, ms: Date.now() - tC });
+                } catch (e) {
+                    warmed.push({ storeId, error: String(e?.message || e), ms: Date.now() - tC });
+                }
+            }
+            res.status(200).json({ ok: true, warmed, total_ms: Date.now() - t0 });
+        } catch (err) {
+            res.status(200).json({ ok: false, error: String(err?.message || err), total_ms: Date.now() - t0 });
+        }
+        return;
+    }
+
     try {
         const client = getTursoClient();
 
