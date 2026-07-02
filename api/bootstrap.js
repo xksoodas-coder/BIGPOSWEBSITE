@@ -49,8 +49,23 @@ export default async function handler(req, res) {
         try {
             const client = getTursoClient();
             await client.execute('SELECT 1');
-            const ids = (process.env.WARMUP_STORE_IDS || '')
+            // Which store(s) to warm the catalog snapshot for:
+            //   1. an explicit ?store=<id,id> list (overrides everything), else
+            //   2. the WARMUP_STORE_IDS env allow-list, else
+            //   3. the store resolved from THIS request's host — so pinging
+            //      haithemstore.bigsoft.top warms *haithemstore's* catalog.
+            // Read-only, so it needs no auth (safe to bypass the tenant gate).
+            let ids = (req.query?.store || '').toString()
                 .split(',').map(s => s.trim()).filter(Boolean);
+            if (ids.length === 0) {
+                ids = (process.env.WARMUP_STORE_IDS || '')
+                    .split(',').map(s => s.trim()).filter(Boolean);
+            }
+            if (ids.length === 0) {
+                const tenant = await resolveTenant(req).catch(() => null);
+                if (tenant && tenant.storeId) ids = [tenant.storeId];
+            }
+            ids = [...new Set(ids)];
             const warmed = [];
             for (const storeId of ids) {
                 const tC = Date.now();
