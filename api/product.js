@@ -1,6 +1,7 @@
 import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess } from './_lib/access.js';
 import { productImageUrl, productImageUrlLegacy } from './_lib/r2.js';
+import { buyerPricing, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
 
 /**
  * GET /api/product?uuid=<recordUuid>
@@ -88,20 +89,33 @@ export default async function handler(req, res) {
             }
         } catch { /* table may not exist yet */ }
 
-        res.setHeader('Cache-Control', 'private, max-age=30');
-        res.status(200).json({
-            uuid,
-            name: full.name ?? '',
-            shortDescription,
-            description,
-            price: Number(full.sellPrice ?? 0),
+        // مستويات الأسعار المسموحة للمشتري — لا نكشف باقي المستويات.
+        const gt = access.session ? 1 : await guestPriceTier(client, access.storeId);
+        const { allowed, pricePerProduct } = buyerPricing(access.session, gt);
+        const priced = projectProductPrices({
             price1: Number(full.sellPrice ?? 0),
             price2: Number(full.wholesalePrice ?? 0),
             price3: Number(full.price3 ?? 0),
             price4: Number(ex[0] ?? 0),
             price5: Number(ex[1] ?? 0),
             price6: Number(ex[2] ?? 0),
-            price7: Number(ex[3] ?? 0),
+            price7: Number(ex[3] ?? 0)
+        }, allowed, pricePerProduct);
+
+        res.setHeader('Cache-Control', 'private, max-age=30');
+        res.status(200).json({
+            uuid,
+            name: full.name ?? '',
+            shortDescription,
+            description,
+            price: priced.price,
+            price1: priced.price1,
+            price2: priced.price2,
+            price3: priced.price3,
+            price4: priced.price4,
+            price5: priced.price5,
+            price6: priced.price6,
+            price7: priced.price7,
             quantity: qty,
             available: qty > 0,
             unitType: full.unitType ?? 'قطعة',

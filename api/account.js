@@ -11,8 +11,10 @@ import { readSessionFromRequest } from './_lib/session.js';
  *   paid      = Σ invoice.PaidAmount + Σ payment.Amount
  *
  * Cancelled invoices (Status == 2) and deleted records are excluded.
- * The customer is matched by the desktop DB id:
- *   invoice.CustomerNumber == payment.CustomerId == addedDebt.CustomerId == customerId
+ * The customer is matched by NAME (CustomerName), which is stable across devices.
+ * The integer id (CustomerNumber/CustomerId) is the source device's local PK and
+ * collides between devices/customers — matching by it showed unrelated debts to
+ * the wrong customer. Falls back to id only when the session carries no name.
  */
 export default async function handler(req, res) {
     if (req.method !== 'GET') {
@@ -34,6 +36,31 @@ export default async function handler(req, res) {
             return;
         }
         const cid = Number(customerId);
+
+        // ── مطابقة الزبون بالاسم (المفتاح المستقر بين الأجهزة) لا بالرقم ──
+        // الرقم (CustomerNumber/CustomerId) هو المعرّف المحلي للجهاز المصدر، وكل جهاز
+        // يرقّم زبائنه باستقلال ⇒ زبونان مختلفان قد يحملان نفس الرقم، فتظهر للزبون ديون
+        // ليست له. تطبيق سطح المكتب يعالج هذا بإعادة المطابقة بالاسم؛ نفعل المثل هنا.
+        // الاسم متوفّر في كل الحمولات (CustomerName) واسم الزبون في الجلسة (session.name).
+        const targetName = normName(session.name);
+        const targetPhone = normPhone(session.phone);
+        // إن غاب الاسم (جلسة/سجل قديم) نرجع للرقم كحل احتياطي (سلوك سابق).
+        // phoneField (للفواتير فقط): تمييز إضافي يقلّل تصادم الأسماء المتطابقة —
+        // إذا حمل السجلُّ والجلسةُ رقمَي هاتف وكانا مختلفين بوضوح، يُستبعَد السجل.
+        // (التسديدات/الديون لا تحمل هاتفاً ⇒ تبقى مطابقتها بالاسم فقط.)
+        function belongsToCustomer(data, idField, phoneField) {
+            const recName = normName(data.CustomerName ?? data.customerName);
+            if (targetName) {
+                if (recName !== targetName) return false;
+                // الاسم مطابق — تحقّق الهاتف كحاسم نزاع عند توفّره على الطرفين
+                if (phoneField && targetPhone) {
+                    const recPhone = normPhone(data[phoneField] ?? data.PhoneNumber ?? data.phoneNumber);
+                    if (recPhone && recPhone !== targetPhone) return false;
+                }
+                return true;
+            }
+            return Number(data[idField]) === cid;
+        }
 
         const client = getTursoClient();
         const [invoices, payments, debts] = await Promise.all([
@@ -85,7 +112,7 @@ export default async function handler(req, res) {
             if (entry.status === 2) continue; // cancelled
             const data = entry.full;
             if (!data) continue;
-            if (Number(data.CustomerNumber) !== cid) continue;
+            if (!belongsToCustomer(data, 'CustomerNumber', 'PhoneNumber')) continue;
             sumDue += Number(data.DueAmount || 0);
         }
 
@@ -93,7 +120,7 @@ export default async function handler(req, res) {
         const payMap = reduceLatest(payments.rows);
         let sumPayments = 0;
         for (const data of payMap.values()) {
-            if (Number(data.CustomerId) !== cid) continue;
+            if (!belongsToCustomer(data, 'CustomerId')) continue;
             sumPayments += Number(data.Amount || 0);
         }
 
@@ -101,7 +128,7 @@ export default async function handler(req, res) {
         const debtMap = reduceLatest(debts.rows);
         let sumAddedDebts = 0;
         for (const data of debtMap.values()) {
-            if (Number(data.CustomerId) !== cid) continue;
+            if (!belongsToCustomer(data, 'CustomerId')) continue;
             sumAddedDebts += Number(data.Amount || 0);
         }
 
@@ -119,6 +146,19 @@ export default async function handler(req, res) {
         console.error('[account] error', err);
         res.status(500).json({ error: 'تعذّر تحميل بيانات الحساب' });
     }
+}
+
+// تطبيع اسم الزبون للمقارنة: إزالة الفراغات الزائدة + توحيد الحالة.
+function normName(s) {
+    return String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// تطبيع رقم الهاتف: أرقام فقط، ثم آخر 9 خانات (الرقم الوطني) لاستيعاب اختلاف
+// الصفر البادئ/رمز الدولة (+213). فارغ إن لم يوجد رقم معتبر.
+function normPhone(s) {
+    const digits = String(s ?? '').replace(/\D/g, '');
+    if (digits.length < 6) return ''; // قصير جداً/غير معتبر — لا نحاسب عليه
+    return digits.length > 9 ? digits.slice(-9) : digits;
 }
 
 function reduceLatest(rows) {

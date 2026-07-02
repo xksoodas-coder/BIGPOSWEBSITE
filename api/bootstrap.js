@@ -4,6 +4,7 @@ import { resolveTenant } from './_lib/tenant.js';
 import { getCatalog } from './_lib/catalog.js';
 import { storeLogoUrl } from './_lib/r2.js';
 import { flattenFamilies } from './_lib/families.js';
+import { buyerPricing, projectProductPrices } from './_lib/pricing.js';
 
 /**
  * GET /api/bootstrap?display=products&limit=&offset=
@@ -95,6 +96,11 @@ export default async function handler(req, res) {
             return;
         }
 
+        // مستويات الأسعار المسموحة للمشتري — تُسقَط على كل المنتجات المُعادة كي لا
+        // تُكشف باقي المستويات (الجملة/الخاصة) للزبون.
+        const { allowed, pricePerProduct } = buyerPricing(loggedIn ? session : null, guestTier || 1);
+        const projectP = (p) => projectProductPrices(p, allowed, pricePerProduct);
+
         // ----- 4. Store branding + families -----
         // Read independently (NOT one batch): turso_deleted_properties only
         // exists once a property was deleted on a phone, and a missing table
@@ -172,12 +178,12 @@ export default async function handler(req, res) {
                     // The payload stays small because it's a single family.
                     const fam = Array.isArray(families) ? families.find(f => f.id === familyIdQ) : null;
                     const flist = (fam ? list.filter(p => p.family === fam.name) : [])
-                        .map(p => ({ ...p, isFavorite: false }));
+                        .map(p => ({ ...projectP(p), isFavorite: false }));
                     products = { products: flist, total: flist.length, familyId: familyIdQ, size, complete: true };
                 } else {
                     // All-products home: keep server pagination (it's the whole catalog).
                     const total = list.length;
-                    const paged = list.slice(0, size).map(p => ({ ...p, isFavorite: false }));
+                    const paged = list.slice(0, size).map(p => ({ ...projectP(p), isFavorite: false }));
                     products = { products: paged, total };
                 }
             } catch {
@@ -214,13 +220,13 @@ export default async function handler(req, res) {
                         }
                     } catch { /* descriptions table may not exist yet */ }
 
-                    product = { ...sel, isFavorite: false, shortDescription, description };
+                    product = { ...projectP(sel), isFavorite: false, shortDescription, description };
 
                     // Same-family siblings for the "related" grid + instant switch.
                     const hideOOS = settings && settings.showOutOfStock === false;
                     let sibs = catalog.filter(p => p.family === sel.family);
                     if (hideOOS) sibs = sibs.filter(p => p.available);
-                    familyProducts = sibs.map(p => ({ ...p, isFavorite: false }));
+                    familyProducts = sibs.map(p => ({ ...projectP(p), isFavorite: false }));
                 }
             } catch { /* client falls back to the per-endpoint path */ }
         }

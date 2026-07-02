@@ -83,6 +83,11 @@ export default async function handler(req, res) {
                 return;
             }
             const json = JSON.stringify(incoming);
+            // حدّ حجم وقائي (≈ 256KB) لمنع تخزين حمولة ضخمة.
+            if (json.length > 256 * 1024) {
+                res.status(413).json({ error: 'حجم الإعدادات كبير جدًا' });
+                return;
+            }
             await client.execute({
                 sql: `INSERT INTO bws_site_settings (store_id, settings_json, updated_at)
                       VALUES (?, ?, ?)

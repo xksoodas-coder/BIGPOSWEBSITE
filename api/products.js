@@ -2,6 +2,7 @@ import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess, getStoreSettings } from './_lib/access.js';
 import { getCatalog } from './_lib/catalog.js';
 import { splitFamilies } from './_lib/families.js';
+import { buyerPricing, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
 
 /**
  * GET /api/products?family=<name>&favorites=1&limit=&offset=
@@ -57,6 +58,10 @@ export default async function handler(req, res) {
         const settings = await getStoreSettings(storeId);
         const hideOOS = settings.showOutOfStock === false;
 
+        // مستويات الأسعار المسموحة للمشتري — لا نكشف باقي المستويات (الجملة...).
+        const gt = session ? 1 : await guestPriceTier(client, storeId);
+        const { allowed, pricePerProduct } = buyerPricing(session, gt);
+
         // Whole catalogue (shaped, snapshot-cached) → apply the request filters.
         const catalog = await getCatalog(client, storeId);
         const products = [];
@@ -67,7 +72,9 @@ export default async function handler(req, res) {
             if (familyFilter && !splitFamilies(p.family).includes(familyFilter)) continue;
             const isFavorite = favSet.has(p.uuid);
             if (favoritesOnly && !isFavorite) continue;
-            products.push(isFavorite ? { ...p, isFavorite } : { ...p, isFavorite: false });
+            const proj = projectProductPrices(p, allowed, pricePerProduct);
+            proj.isFavorite = isFavorite;
+            products.push(proj);
         }
 
         const total = products.length;

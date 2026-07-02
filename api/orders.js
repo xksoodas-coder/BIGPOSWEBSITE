@@ -2,18 +2,28 @@ import { randomUUID, createHash, createHmac } from 'node:crypto';
 import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
 import { resolveStoreAccess, getStoreSettings } from './_lib/access.js';
+import { getCatalog } from './_lib/catalog.js';
+import { clientIp, isRateLimited, recordFailure } from './_lib/ratelimit.js';
+
+// حدّ إنشاء الطلبات لكل IP (نافذة 10 دقائق) — يمنع إغراق المتجر بطلبات.
+const ORDER_RL_WINDOW_MS = 10 * 60 * 1000;
+const ORDER_RL_MAX = 15;
+const MAX_ITEMS_PER_ORDER = 100;
 
 // ─── Pusher Channels (same app the mobile listens on) ───
 // Lets the store's phones get a real-time notification when a customer places
-// an order. Credentials can be overridden via env; defaults match the app.
+// an order. appId/key/cluster are public (sent to clients); the SECRET must be
+// provided via env only — never hard-coded (it can publish to any channel).
 const PUSHER = {
     appId: process.env.PUSHER_APP_ID || '2152180',
     key: process.env.PUSHER_KEY || '0fa1f776b3ea9e8e337c',
-    secret: process.env.PUSHER_SECRET || 'f2d2aedceba1a7a97287',
+    secret: process.env.PUSHER_SECRET || '',
     cluster: process.env.PUSHER_CLUSTER || 'eu'
 };
 
 async function notifyNewOrder(storeId, customerName, total) {
+    // No secret configured → skip silently (notification is best-effort).
+    if (!PUSHER.secret) return;
     try {
         const channel = `store-${storeId}`;
         const message = `طلبية جديدة من ${customerName || 'زبون'} — ${Math.round(total)} دج`;
@@ -119,9 +129,21 @@ export default async function handler(req, res) {
                 }
             }
 
+            // مكافحة الإغراق: حدّ إنشاء الطلبات لكل IP (لا يُلتفّ عليه بتغيير الهاتف).
+            const ip = clientIp(req);
+            const orderRlKey = `order:${storeId}:${ip}`;
+            if (await isRateLimited(client, orderRlKey, ORDER_RL_MAX, ORDER_RL_WINDOW_MS)) {
+                res.status(429).json({ error: 'محاولات كثيرة. يرجى الانتظار قليلاً قبل إرسال طلب آخر.' });
+                return;
+            }
+
             const { items, notes, phone, name, wilaya, baladiya, deliveryType, delivery: deliveryFee } = req.body || {};
             if (!Array.isArray(items) || items.length === 0) {
                 res.status(400).json({ error: 'السلة فارغة' });
+                return;
+            }
+            if (items.length > MAX_ITEMS_PER_ORDER) {
+                res.status(400).json({ error: 'عدد المنتجات في الطلب كبير جدًا.' });
                 return;
             }
 
@@ -182,6 +204,74 @@ export default async function handler(req, res) {
                 return;
             }
 
+            // ─────────────────────────────────────────────────────────────
+            //  سلامة الأسعار: لا نثق بسعر العميل إطلاقاً. نعيد تسعير كل بند من
+            //  الكتالوج (المصدر) حسب مستوى السعر المسموح لهذا المشتري، فلا يمكن
+            //  التلاعب بالإجمالي بإرسال سعر مزيّف.
+            // ─────────────────────────────────────────────────────────────
+            let catalog;
+            try {
+                catalog = await getCatalog(client, storeId);
+            } catch {
+                res.status(503).json({ error: 'تعذّر التحقق من الأسعار. حاول مرة أخرى.' });
+                return;
+            }
+            const byUuid = new Map(catalog.map(p => [p.uuid, p]));
+
+            // مستويات الأسعار المسموحة لهذا المشتري (مطابقة لمنطق العميل).
+            let allowedTiers;
+            let pricePerProduct = false;
+            if (session) {
+                const t = (Array.isArray(session.priceTiers) ? session.priceTiers : [])
+                    .map(Number).filter(n => n >= 1 && n <= 7);
+                allowedTiers = t.length ? Array.from(new Set(t)).sort((a, b) => a - b) : [1];
+                pricePerProduct = session.pricePerProduct === true && allowedTiers.length > 1;
+            } else {
+                // زائر (وضع 'direct'): سعر واحد من إعدادات الموقع (يضبطه تطبيق الهاتف).
+                let gt = 1;
+                try {
+                    const w = await client.execute({
+                        sql: `SELECT json_payload FROM turso_web_settings WHERE store_id = ? LIMIT 1`,
+                        args: [storeId]
+                    });
+                    if (w.rows.length) {
+                        const wj = JSON.parse(w.rows[0].json_payload || '{}');
+                        const n = Number(wj.guestPriceTier);
+                        if (n >= 1 && n <= 7) gt = n;
+                    }
+                } catch { /* default tier 1 */ }
+                allowedTiers = [gt];
+            }
+
+            const priceForTier = (prod, tier) => {
+                const v = Number(prod['price' + tier] ?? 0);
+                if (v > 0) return v;
+                const p1 = Number(prod.price1 ?? prod.price ?? 0);
+                if (p1 > 0) return p1;
+                for (const k of [2, 3, 4, 5, 6, 7]) {
+                    const x = Number(prod['price' + k] ?? 0);
+                    if (x > 0) return x;
+                }
+                return 0;
+            };
+
+            for (const it of cleanItems) {
+                const prod = it.uuid ? byUuid.get(it.uuid) : null;
+                if (!prod) {
+                    res.status(400).json({ error: 'بعض المنتجات لم تعد متوفرة. يرجى تحديث الصفحة وإعادة المحاولة.' });
+                    return;
+                }
+                // سعر واحد: مستوى الزبون الأول (currentTier في العميل). تعدّد:
+                // أي مستوى مسموح له سعر موجب. priceForTier يتكفّل بالاحتياطي.
+                const usable = allowedTiers.filter(t => Number(prod['price' + t] ?? 0) > 0);
+                const tiers = (pricePerProduct && usable.length) ? usable : [allowedTiers[0]];
+                const allowedPrices = tiers.map(t => priceForTier(prod, t));
+                const submitted = Number(it.price || 0);
+                // نقبل سعر العميل فقط إن طابق سعر مستوى مسموح؛ وإلا نفرض سعر الخادم.
+                const matched = allowedPrices.find(ap => Math.abs(ap - submitted) < 0.01);
+                it.price = (matched != null) ? matched : allowedPrices[0];
+            }
+
             const total = cleanItems.reduce((s, it) => s + it.price * it.quantity, 0);
             // سعر التوصيل (يُحتسب في الموقع حسب الولاية/البلدية ونوع التسليم).
             const deliveryAmount = Math.max(0, Number(deliveryFee) || 0);
@@ -207,6 +297,9 @@ export default async function handler(req, res) {
                     w, b, delivery, isGuest ? 1 : 0, deliveryAmount
                 ]
             });
+
+            // عُدّ هذا الطلب ضمن حدّ الـ IP (لمكافحة الإغراق).
+            await recordFailure(client, orderRlKey, ORDER_RL_WINDOW_MS);
 
             // Real-time push to the store's devices (best-effort).
             await notifyNewOrder(storeId, custName, total);

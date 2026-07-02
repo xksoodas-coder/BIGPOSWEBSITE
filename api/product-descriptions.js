@@ -102,8 +102,9 @@ export default async function handler(req, res) {
                 res.status(400).json({ error: 'معرّف المنتج مطلوب' });
                 return;
             }
-            const shortDesc = (req.body?.shortDescription ?? '').toString();
-            const fullDesc = (req.body?.description ?? '').toString();
+            // حدود طول وقائية (تجنّب تخزين نصوص ضخمة).
+            const shortDesc = (req.body?.shortDescription ?? '').toString().slice(0, 2000);
+            const fullDesc = (req.body?.description ?? '').toString().slice(0, 20000);
 
             await client.execute({
                 sql: `INSERT INTO bws_product_descriptions

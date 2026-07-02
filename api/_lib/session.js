@@ -17,8 +17,16 @@ function b64urlDecode(str) {
     return Buffer.from(str, 'base64');
 }
 
+// رافعة إبطال عام (اختيارية): اضبط BWS_SESSION_EPOCH في البيئة لإبطال كل
+// الجلسات السابقة فوراً (تسجيل خروج للجميع) دون تغيير سرّ التوقيع. تُحقن في كل
+// رمز جديد وتُفحَص عند التحقّق. إن لم تُضبط فلا فحص (متوافق خلفياً).
+function sessionEpoch() {
+    return process.env.BWS_SESSION_EPOCH || '';
+}
+
 export function signSession(payload) {
-    const body = b64url(JSON.stringify(payload));
+    const withEpoch = { ...payload, se: sessionEpoch() };
+    const body = b64url(JSON.stringify(withEpoch));
     const sig = b64url(createHmac('sha256', getSecret()).update(body).digest());
     return `${body}.${sig}`;
 }
@@ -38,6 +46,9 @@ export function verifySession(token) {
     try {
         const payload = JSON.parse(b64urlDecode(body).toString('utf8'));
         if (payload.exp && Date.now() / 1000 > payload.exp) return null;
+        // إبطال عام: عند ضبط حقبة جديدة في البيئة تُرفض كل الرموز الأقدم.
+        const epoch = sessionEpoch();
+        if (epoch && String(payload.se || '') !== epoch) return null;
         return payload;
     } catch {
         return null;
