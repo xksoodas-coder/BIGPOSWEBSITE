@@ -48,14 +48,54 @@ async function sbGet(path) {
 }
 
 /**
+ * Fetch ALL rows for a query, paging past PostgREST's max-rows cap (default
+ * 1000). Without this a store with >1000 products/families gets a silently
+ * truncated (and, with no ORDER BY, non-deterministic) list — products would
+ * randomly go missing. `path` MUST include an `order=` for stable paging.
+ */
+async function sbGetAll(path, pageSize = 1000) {
+    const { url, key } = sbConfig();
+    const all = [];
+    let from = 0;
+    let total = Infinity;
+    while (from < total) {
+        const to = from + pageSize - 1;
+        const res = await fetch(`${url}/rest/v1/${path}`, {
+            headers: {
+                apikey: key,
+                authorization: `Bearer ${key}`,
+                accept: 'application/json',
+                Range: `${from}-${to}`,
+                'Range-Unit': 'items',
+                Prefer: 'count=exact'
+            }
+        });
+        if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            throw new Error(`supabase ${res.status}: ${text.slice(0, 200)}`);
+        }
+        const batch = await res.json();
+        // Content-Range: "items 0-999/12345" → learn the real total to bound the loop.
+        const cr = res.headers.get('content-range') || '';
+        const m = cr.match(/\/(\d+)\s*$/);
+        if (m) total = Number(m[1]);
+        if (!Array.isArray(batch) || batch.length === 0) break;
+        all.push(...batch);
+        from += batch.length; // advance by what the server actually returned
+        if (!m && batch.length < pageSize) break; // no total header → stop when short
+    }
+    return all;
+}
+
+/**
  * Return the store's catalog (array of shaped products, sorted by name),
  * WITHOUT per-customer flags — same shape as getCatalog() from catalog.js.
  * Hidden products (web_visible=false) are excluded server-side.
  */
 export async function getSupabaseCatalog(storeId) {
     const q = `products?store_id=eq.${encodeURIComponent(storeId)}` +
-              `&web_visible=eq.true&select=${PRODUCT_COLUMNS}`;
-    const rows = await sbGet(q);
+              `&web_visible=eq.true&select=${PRODUCT_COLUMNS}&order=uuid.asc`;
+    const rows = await sbGetAll(q);
 
     const products = rows.map((row) => {
         const uuid = row.uuid;
@@ -105,7 +145,7 @@ export async function getSupabaseCatalog(storeId) {
 export async function getSupabaseFamilies(storeId) {
     const q = `families?store_id=eq.${encodeURIComponent(storeId)}` +
               `&select=family_id,parent_id,name,uuid,image_version&order=family_id.asc`;
-    const rows = await sbGet(q);
+    const rows = await sbGetAll(q);
 
     return rows.map((row) => {
         const uuid = String(row.uuid || '').trim();

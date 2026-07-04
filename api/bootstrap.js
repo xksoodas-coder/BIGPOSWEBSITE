@@ -4,6 +4,7 @@ import { resolveTenant } from './_lib/tenant.js';
 import { getSupabaseCatalog, getSupabaseFamilies } from './_lib/supabase.js';
 import { storeLogoUrl } from './_lib/r2.js';
 import { buyerPricing, projectProductPrices } from './_lib/pricing.js';
+import { splitFamilies } from './_lib/families.js';
 
 /**
  * GET /api/bootstrap?display=products&limit=&offset=
@@ -176,7 +177,10 @@ export default async function handler(req, res) {
                     // fill the viewport) were what made entering a category slow.
                     // The payload stays small because it's a single family.
                     const fam = Array.isArray(families) ? families.find(f => f.id === familyIdQ) : null;
-                    const flist = (fam ? list.filter(p => p.family === fam.name) : [])
+                    // منتج قد ينتمي لعدّة عائلات محزومة في `family` ("A~@~B") — نطابق
+                    // الاحتواء بـ splitFamilies بدل التطابق التام، وإلا اختفت المنتجات
+                    // متعدّدة العائلات من التحميل المسبق (وظهرت فقط عبر الجلب المباشر).
+                    const flist = (fam ? list.filter(p => splitFamilies(p.family).includes(fam.name)) : [])
                         .map(p => ({ ...projectP(p), isFavorite: false }));
                     products = { products: flist, total: flist.length, familyId: familyIdQ, size, complete: true };
                 } else {
@@ -222,8 +226,13 @@ export default async function handler(req, res) {
                     product = { ...projectP(sel), isFavorite: false, shortDescription, description };
 
                     // Same-family siblings for the "related" grid + instant switch.
+                    // منتج المنتج المختار قد يحمل عدّة عائلات؛ الأشقّاء = من يشارك أيّ
+                    // عائلة منها (بدل التطابق التام الذي يفوّت متعدّدي العائلات).
                     const hideOOS = settings && settings.showOutOfStock === false;
-                    let sibs = catalog.filter(p => p.family === sel.family);
+                    const selFams = new Set(splitFamilies(sel.family));
+                    let sibs = selFams.size
+                        ? catalog.filter(p => splitFamilies(p.family).some(n => selFams.has(n)))
+                        : [];
                     if (hideOOS) sibs = sibs.filter(p => p.available);
                     familyProducts = sibs.map(p => ({ ...projectP(p), isFavorite: false }));
                 }
