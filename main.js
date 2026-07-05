@@ -549,29 +549,53 @@ async function renderCategoriesGrid() {
         return;
     }
 
-    // نعرض أول 30 تصنيفًا فقط في هذا المستوى (تحميل أخفّ عند الدخول).
-    const MAX_CATEGORIES = 30;
-    const shown = level.slice(0, MAX_CATEGORIES);
+    // ترقيم صفحات التصنيفات: 50 تصنيفًا لكل صفحة مع أزرار السابق/التالي.
+    // التقسيم محلي (التصنيفات محمّلة أصلاً ككتلة خفيفة) → لا قراءات إضافية.
+    const CATS_PER_PAGE = 50;
+    let catPage = 1;
 
-    grid.innerHTML = shown.map(f => {
-        const href = hasChildren(f.id)
-            ? categoriesHref('?parent=' + f.id)
-            : withTenant('products.html?familyId=' + f.id);
-        return `
-        <a href="${href}" class="category-card">
-            <div class="category-image">
-                ${renderImageOrPlaceholder(f.imageUrl || null, f.imageUrlLegacy || null)}
-            </div>
-            <div class="category-name">${escapeHtml(f.name)}</div>
-        </a>`;
-    }).join('');
-
-    if (level.length > MAX_CATEGORIES) {
-        const note = document.createElement('p');
-        note.style.cssText = 'text-align:center;color:var(--text-muted);font-size:13px;margin:14px 0 0';
-        note.textContent = `عرض أول ${MAX_CATEGORIES} تصنيفًا من ${level.length}.`;
-        grid.after(note);
+    const section = grid.closest('.content-section') || grid.parentElement;
+    let catPager = document.getElementById('categoriesPager');
+    if (!catPager) {
+        catPager = document.createElement('div');
+        catPager.id = 'categoriesPager';
+        catPager.className = 'products-pager';
+        section.appendChild(catPager);
     }
+
+    function renderCatPager() {
+        const pages = Math.max(1, Math.ceil(level.length / CATS_PER_PAGE));
+        if (pages <= 1) { catPager.innerHTML = ''; return; }
+        catPager.innerHTML = `
+            <button class="pager-btn" id="catPrev" ${catPage <= 1 ? 'disabled' : ''}>◄ السابق</button>
+            <span class="pager-info">صفحة ${catPage} من ${pages}</span>
+            <button class="pager-btn" id="catNext" ${catPage >= pages ? 'disabled' : ''}>التالي ►</button>
+        `;
+        document.getElementById('catPrev')?.addEventListener('click', () => { if (catPage > 1) showCatPage(catPage - 1); });
+        document.getElementById('catNext')?.addEventListener('click', () => { if (catPage < pages) showCatPage(catPage + 1); });
+    }
+
+    function showCatPage(p) {
+        catPage = p;
+        const start = (p - 1) * CATS_PER_PAGE;
+        const shown = level.slice(start, start + CATS_PER_PAGE);
+        grid.innerHTML = shown.map(f => {
+            const href = hasChildren(f.id)
+                ? categoriesHref('?parent=' + f.id)
+                : withTenant('products.html?familyId=' + f.id);
+            return `
+            <a href="${href}" class="category-card">
+                <div class="category-image">
+                    ${renderImageOrPlaceholder(f.imageUrl || null, f.imageUrlLegacy || null)}
+                </div>
+                <div class="category-name">${escapeHtml(f.name)}</div>
+            </a>`;
+        }).join('');
+        renderCatPager();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    showCatPage(1);
 }
 
 // Href to the CURRENT categories page (index.html / categories.html) carrying a
@@ -914,7 +938,7 @@ async function renderSearchResults(query, titleEl, subtitleEl, grid, emptyState)
 // from Supabase — the whole category is NEVER loaded at once. Page 1 may come
 // preloaded by bootstrap (same shape) to save one request.
 async function renderFamilyPaged(family, grid, emptyState) {
-    const size = 15; // الحد الأقصى للمنتجات داخل التصنيف لكل صفحة
+    const size = 30; // الحد الأقصى للمنتجات داخل التصنيف لكل صفحة
     let page = 1;
 
     grid.style.display = '';

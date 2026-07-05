@@ -76,15 +76,22 @@ export default async function handler(req, res) {
                 sql: `SELECT version FROM turso_users WHERE store_id = ? LIMIT 1`,
                 args: [targetStore]
             });
-            storeVersion = (vr.rows[0]?.version ?? '').toString().trim().toLowerCase();
+            // تطبيع صارم: نُبقي الحروف اللاتينية الصغيرة فقط — يزيل المسافات
+            // وعلامات الاتجاه المخفية (RTL/LRM) وأي رموز غير مرئية قد تُلصق مع
+            // القيمة عند كتابتها في واجهة قاعدة البيانات.
+            storeVersion = String(vr.rows[0]?.version ?? '').toLowerCase().replace(/[^a-z]/g, '');
         } catch {
             versionColumnMissing = true; // العمود/الجدول غير موجود → لا تحجب
         }
-        if (!versionColumnMissing && storeVersion !== 'clasicc' && storeVersion !== 'pro') {
+        const isProVer = storeVersion === 'pro';
+        const isClassicVer = storeVersion === 'clasicc' || storeVersion === 'classic';
+        if (!versionColumnMissing && !isProVer && !isClassicVer) {
             res.status(403).json({ error: 'هذا المتجر غير مُفعّل حاليًا. يرجى التواصل مع المزوّد.' });
             return;
         }
-        const storeVersionOut = versionColumnMissing ? '' : storeVersion;
+        const storeVersionOut = versionColumnMissing
+            ? ''
+            : (isProVer ? 'pro' : (isClassicVer ? 'clasicc' : ''));
 
         // ── Brute-force throttle: per (store+username) and per IP, 15-min window ──
         const ip = clientIp(req);

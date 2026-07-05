@@ -146,7 +146,7 @@ export async function getSupabaseCatalog(storeId) {
  *   - ترتيب name.asc + Range للصفحة + Prefer count=exact لإجمالي العدد.
  * يعيد { products: [مُشكَّلة], total }. يرمي عند الخطأ (المستدعي يتراجع للكتالوج).
  */
-export async function getSupabaseFamilyPage(storeId, familyName, { hideOOS = false, limit = 15, offset = 0 } = {}) {
+export async function getSupabaseFamilyPage(storeId, familyName, { hideOOS = false, limit = 30, offset = 0 } = {}) {
     const { url, key } = sbConfig();
     const sep = '~@~';
     // نُهرّب اسم العائلة للاستعمال داخل قيم PostgREST. الأسماء الشائعة (عربية/

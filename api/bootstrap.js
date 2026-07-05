@@ -164,9 +164,9 @@ export default async function handler(req, res) {
             // page lines up with the offsets the client requests for page 2+.
             let ps = Number(settings && settings.pageSize);
             ps = (Number.isFinite(ps) && ps > 0) ? Math.min(200, Math.floor(ps)) : 25;
-            // تصنيف: 15 منتجًا في الصفحة (كما طلب المتجر). الصفحة الرئيسية
+            // تصنيف: 30 منتجًا في الصفحة (كما طلب المتجر). الصفحة الرئيسية
             // «كل المنتجات» تبقى على pageSize الإعدادات.
-            const size = familyIdQ > 0 ? 15 : ps;
+            const size = familyIdQ > 0 ? 30 : ps;
             try {
                 const hideOOS = settings && settings.showOutOfStock === false;
                 if (familyIdQ > 0) {
