@@ -65,6 +65,27 @@ export default async function handler(req, res) {
         const uname = String(username).trim().toLowerCase();
         const client = getTursoClient();
 
+        // ── بوابة الإصدار (version): لا دخول لزبون أو أدمين إلا إذا كان إصدار
+        //    المتجر «clasicc» أو «pro» (يُقرأ من عمود version في turso_users).
+        //    سطر فارغ/قيمة أخرى → المتجر غير مُفعّل. فتح-آمن إن لم يوجد العمود بعد
+        //    (لئلا ينكسر الخادم قبل تهيئة العمود). ──
+        let storeVersion = '';
+        let versionColumnMissing = false;
+        try {
+            const vr = await client.execute({
+                sql: `SELECT version FROM turso_users WHERE store_id = ? LIMIT 1`,
+                args: [targetStore]
+            });
+            storeVersion = (vr.rows[0]?.version ?? '').toString().trim().toLowerCase();
+        } catch {
+            versionColumnMissing = true; // العمود/الجدول غير موجود → لا تحجب
+        }
+        if (!versionColumnMissing && storeVersion !== 'clasicc' && storeVersion !== 'pro') {
+            res.status(403).json({ error: 'هذا المتجر غير مُفعّل حاليًا. يرجى التواصل مع المزوّد.' });
+            return;
+        }
+        const storeVersionOut = versionColumnMissing ? '' : storeVersion;
+
         // ── Brute-force throttle: per (store+username) and per IP, 15-min window ──
         const ip = clientIp(req);
         const userKey = `u:${targetStore}:${uname}`;
@@ -142,6 +163,7 @@ export default async function handler(req, res) {
                 ok: true,
                 token,
                 isAdmin: true,
+                version: storeVersionOut, // '' | 'clasicc' | 'pro' — للتحكّم بالصلاحيات
                 customer: { name: user.Name || username, phone: '' }
             });
             return;

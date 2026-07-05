@@ -1,6 +1,6 @@
 import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess, getStoreSettings } from './_lib/access.js';
-import { getSupabaseCatalog } from './_lib/supabase.js';
+import { getSupabaseCatalog, getSupabaseFamilyPage } from './_lib/supabase.js';
 import { splitFamilies } from './_lib/families.js';
 import { buyerPricing, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
 
@@ -61,6 +61,27 @@ export default async function handler(req, res) {
         // مستويات الأسعار المسموحة للمشتري — لا نكشف باقي المستويات (الجملة...).
         const gt = session ? 1 : await guestPriceTier(client, storeId);
         const { allowed, pricePerProduct } = buyerPricing(session, gt);
+
+        // ── المسار المُحسَّن: تصفّح عائلة بترقيم صفحات ──
+        // نقرأ صفحة الـ limit فقط من Supabase (لا الكتالوج كاملاً) → قراءات أقل.
+        // يُستخدم فقط مع (عائلة محدّدة + ليس المفضّلة + limit>0). أي خطأ → تراجُع.
+        if (familyFilter && !favoritesOnly && limit > 0) {
+            try {
+                const { products: pageRows, total } = await getSupabaseFamilyPage(
+                    storeId, familyFilter, { hideOOS, limit, offset });
+                const products = pageRows.map((p) => {
+                    const proj = projectProductPrices(p, allowed, pricePerProduct);
+                    proj.isFavorite = favSet.has(p.uuid);
+                    return proj;
+                });
+                res.setHeader('Cache-Control', 'private, max-age=15');
+                res.status(200).json({ products, total });
+                return;
+            } catch (e) {
+                console.error('[products] family-page fallback:', e?.message || e);
+                // نُكمل بالطريقة الكاملة أدناه (تبقى صحيحة).
+            }
+        }
 
         // Whole catalogue — read only from Supabase (current-state table).
         const catalog = await getSupabaseCatalog(storeId);

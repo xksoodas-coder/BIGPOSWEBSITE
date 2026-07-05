@@ -1,7 +1,7 @@
 import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
 import { resolveTenant } from './_lib/tenant.js';
-import { getSupabaseCatalog, getSupabaseFamilies } from './_lib/supabase.js';
+import { getSupabaseCatalog, getSupabaseFamilies, getSupabaseFamilyPage } from './_lib/supabase.js';
 import { storeLogoUrl } from './_lib/r2.js';
 import { buyerPricing, projectProductPrices } from './_lib/pricing.js';
 import { splitFamilies } from './_lib/families.js';
@@ -164,35 +164,35 @@ export default async function handler(req, res) {
             // page lines up with the offsets the client requests for page 2+.
             let ps = Number(settings && settings.pageSize);
             ps = (Number.isFinite(ps) && ps > 0) ? Math.min(200, Math.floor(ps)) : 25;
-            const size = familyIdQ > 0 ? Math.max(12, ps) : ps;
+            // تصنيف: 15 منتجًا في الصفحة (كما طلب المتجر). الصفحة الرئيسية
+            // «كل المنتجات» تبقى على pageSize الإعدادات.
+            const size = familyIdQ > 0 ? 15 : ps;
             try {
-                const catalog = await getSupabaseCatalog(storeId);
-                // Hide out-of-stock items when the store opted to (lighter payload).
                 const hideOOS = settings && settings.showOutOfStock === false;
-                let list = hideOOS ? catalog.filter(p => p.available) : catalog;
                 if (familyIdQ > 0) {
-                    // A category: return its WHOLE product list (not just page 1)
-                    // so the client paginates IN MEMORY on scroll — no per-page
-                    // network requests. Those sequential paged fetches (fired to
-                    // fill the viewport) were what made entering a category slow.
-                    // The payload stays small because it's a single family.
+                    // تصنيف: نقرأ **الصفحة الأولى فقط** (15) مباشرةً من Supabase —
+                    // لا نقرأ كامل الكتالوج. البقية تُجلب صفحةً-صفحة عند التقليب.
                     const fam = Array.isArray(families) ? families.find(f => f.id === familyIdQ) : null;
-                    // منتج قد ينتمي لعدّة عائلات محزومة في `family` ("A~@~B") — نطابق
-                    // الاحتواء بـ splitFamilies بدل التطابق التام، وإلا اختفت المنتجات
-                    // متعدّدة العائلات من التحميل المسبق (وظهرت فقط عبر الجلب المباشر).
-                    const flist = (fam ? list.filter(p => splitFamilies(p.family).includes(fam.name)) : [])
-                        .map(p => ({ ...projectP(p), isFavorite: false }));
-                    products = { products: flist, total: flist.length, familyId: familyIdQ, size, complete: true };
+                    if (fam) {
+                        const { products: pageRows, total } = await getSupabaseFamilyPage(
+                            storeId, fam.name, { hideOOS, limit: size, offset: 0 });
+                        const flist = pageRows.map(p => ({ ...projectP(p), isFavorite: false }));
+                        products = { products: flist, total, familyId: familyIdQ, size, complete: false };
+                    } else {
+                        products = { products: [], total: 0, familyId: familyIdQ, size, complete: false };
+                    }
                 } else {
                     // All-products home: keep server pagination (it's the whole catalog).
+                    const catalog = await getSupabaseCatalog(storeId);
+                    const list = hideOOS ? catalog.filter(p => p.available) : catalog;
                     const total = list.length;
                     const paged = list.slice(0, size).map(p => ({ ...projectP(p), isFavorite: false }));
                     products = { products: paged, total };
                 }
             } catch {
-                products = familyIdQ > 0
-                    ? { products: [], total: 0, familyId: familyIdQ, size, complete: true }
-                    : { products: [], total: 0 };
+                // فشل التحميل المسبق → لا نُثبّت صفحةً (products=null) كي يجلبها
+                // العميل بنفسه (يتفادى إظهار «لا منتجات» عند خطأ عابر).
+                products = null;
             }
         }
 

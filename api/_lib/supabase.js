@@ -87,6 +87,41 @@ async function sbGetAll(path, pageSize = 1000) {
     return all;
 }
 
+/** يحوّل صفّ Supabase خام إلى شكل المنتج الموحّد (نفس شكل getCatalog). */
+function shapeProduct(storeId, row) {
+    const uuid = row.uuid;
+    const imageVersion = String(row.image_version ?? '');
+    const price1 = Number(row.price1 ?? 0);
+    const quantity = Number(row.quantity ?? 0);
+    const sizes = Array.isArray(row.sizes)
+        ? row.sizes
+            .map((s) => ({ name: String(s.name ?? ''), capacity: Number(s.capacity ?? 0) }))
+            .filter((s) => s.name && s.capacity > 0)
+        : [];
+    return {
+        uuid,
+        id: row.product_id ?? null,
+        name: row.name ?? '',
+        family: (row.family || '').toString().trim(),
+        price: price1,
+        price1,
+        price2: Number(row.price2 ?? 0),
+        price3: Number(row.price3 ?? 0),
+        price4: Number(row.price4 ?? 0),
+        price5: Number(row.price5 ?? 0),
+        price6: Number(row.price6 ?? 0),
+        price7: Number(row.price7 ?? 0),
+        quantity,
+        available: quantity > 0,          // ← ≤ 0 → «غير متاح»
+        unitType: row.unit_type ?? 'قطعة',
+        imageVersion,
+        imageUrl: imageVersion ? productImageUrl(storeId, uuid, imageVersion) : '',
+        imageUrlLegacy: imageVersion ? productImageUrlLegacy(uuid, imageVersion) : '',
+        barcode: row.barcode ?? '',
+        sizes
+    };
+}
+
 /**
  * Return the store's catalog (array of shaped products, sorted by name),
  * WITHOUT per-customer flags — same shape as getCatalog() from catalog.js.
@@ -96,44 +131,58 @@ export async function getSupabaseCatalog(storeId) {
     const q = `products?store_id=eq.${encodeURIComponent(storeId)}` +
               `&web_visible=eq.true&select=${PRODUCT_COLUMNS}&order=uuid.asc`;
     const rows = await sbGetAll(q);
-
-    const products = rows.map((row) => {
-        const uuid = row.uuid;
-        const imageVersion = String(row.image_version ?? '');
-        const price1 = Number(row.price1 ?? 0);
-        const quantity = Number(row.quantity ?? 0);
-        const sizes = Array.isArray(row.sizes)
-            ? row.sizes
-                .map((s) => ({ name: String(s.name ?? ''), capacity: Number(s.capacity ?? 0) }))
-                .filter((s) => s.name && s.capacity > 0)
-            : [];
-        return {
-            uuid,
-            id: row.product_id ?? null,
-            name: row.name ?? '',
-            family: (row.family || '').toString().trim(),
-            price: price1,
-            price1,
-            price2: Number(row.price2 ?? 0),
-            price3: Number(row.price3 ?? 0),
-            price4: Number(row.price4 ?? 0),
-            price5: Number(row.price5 ?? 0),
-            price6: Number(row.price6 ?? 0),
-            price7: Number(row.price7 ?? 0),
-            quantity,
-            available: quantity > 0,          // ← ≤ 0 → «غير متاح»
-            unitType: row.unit_type ?? 'قطعة',
-            imageVersion,
-            imageUrl: imageVersion ? productImageUrl(storeId, uuid, imageVersion) : '',
-            imageUrlLegacy: imageVersion ? productImageUrlLegacy(uuid, imageVersion) : '',
-            barcode: row.barcode ?? '',
-            sizes
-        };
-    });
-
+    const products = rows.map((row) => shapeProduct(storeId, row));
     // Preserve the exact Arabic ordering the Turso path used.
     products.sort((a, b) => a.name.localeCompare(b.name, 'ar'));
     return products;
+}
+
+/**
+ * قراءة **صفحة واحدة** من منتجات عائلة معيّنة مباشرةً من Supabase (لا نقرأ كامل
+ * الكتالوج). يقلّل قراءات Supabase إلى صفوف الصفحة فقط عبر:
+ *   - تصفية العائلة على مستوى القاعدة: المنتج يحمل الاسم إمّا وحده أو ضمن سلسلة
+ *     محزومة بـ "~@~" → or=(eq, يبدأ بـ، ينتهي بـ، في الوسط).
+ *   - web_visible=true (+ quantity>0 عند إخفاء غير المتوفر).
+ *   - ترتيب name.asc + Range للصفحة + Prefer count=exact لإجمالي العدد.
+ * يعيد { products: [مُشكَّلة], total }. يرمي عند الخطأ (المستدعي يتراجع للكتالوج).
+ */
+export async function getSupabaseFamilyPage(storeId, familyName, { hideOOS = false, limit = 15, offset = 0 } = {}) {
+    const { url, key } = sbConfig();
+    const sep = '~@~';
+    // نُهرّب اسم العائلة للاستعمال داخل قيم PostgREST. الأسماء الشائعة (عربية/
+    // أرقام/مسافات) آمنة؛ الحالات النادرة (فاصلة/أقواس) قد ترمي → تراجُع.
+    const enc = (s) => encodeURIComponent(s);
+    const v = enc(familyName);
+    const s = enc(sep);
+    const orFilter =
+        `or=(family.eq.${v},family.like.${v}${s}*,family.like.*${s}${v},family.like.*${s}${v}${s}*)`;
+    let path = `products?store_id=eq.${encodeURIComponent(storeId)}` +
+               `&web_visible=eq.true`;
+    if (hideOOS) path += `&quantity=gt.0`;
+    path += `&${orFilter}&select=${PRODUCT_COLUMNS}&order=name.asc`;
+
+    const from = Math.max(0, offset);
+    const to = from + Math.max(1, limit) - 1;
+    const res = await fetch(`${url}/rest/v1/${path}`, {
+        headers: {
+            apikey: key,
+            authorization: `Bearer ${key}`,
+            accept: 'application/json',
+            Range: `${from}-${to}`,
+            'Range-Unit': 'items',
+            Prefer: 'count=exact'
+        }
+    });
+    if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`supabase family-page ${res.status}: ${text.slice(0, 200)}`);
+    }
+    const rows = await res.json();
+    const cr = res.headers.get('content-range') || '';
+    const m = cr.match(/\/(\d+)\s*$/);
+    const total = m ? Number(m[1]) : (Array.isArray(rows) ? rows.length : 0);
+    const products = (Array.isArray(rows) ? rows : []).map((row) => shapeProduct(storeId, row));
+    return { products, total };
 }
 
 /**

@@ -549,7 +549,11 @@ async function renderCategoriesGrid() {
         return;
     }
 
-    grid.innerHTML = level.map(f => {
+    // نعرض أول 30 تصنيفًا فقط في هذا المستوى (تحميل أخفّ عند الدخول).
+    const MAX_CATEGORIES = 30;
+    const shown = level.slice(0, MAX_CATEGORIES);
+
+    grid.innerHTML = shown.map(f => {
         const href = hasChildren(f.id)
             ? categoriesHref('?parent=' + f.id)
             : withTenant('products.html?familyId=' + f.id);
@@ -561,6 +565,13 @@ async function renderCategoriesGrid() {
             <div class="category-name">${escapeHtml(f.name)}</div>
         </a>`;
     }).join('');
+
+    if (level.length > MAX_CATEGORIES) {
+        const note = document.createElement('p');
+        note.style.cssText = 'text-align:center;color:var(--text-muted);font-size:13px;margin:14px 0 0';
+        note.textContent = `عرض أول ${MAX_CATEGORIES} تصنيفًا من ${level.length}.`;
+        grid.after(note);
+    }
 }
 
 // Href to the CURRENT categories page (index.html / categories.html) carrying a
@@ -897,123 +908,85 @@ async function renderSearchResults(query, titleEl, subtitleEl, grid, emptyState)
     deferHydrate(grid);
 }
 
-// Category view: load page 1 immediately (with a skeleton placeholder), then
-// auto-load further pages as the customer nears the bottom (IntersectionObserver
-// sentinel). Each page renders text-first; its images hydrate afterwards.
-async function renderFamilyPaged(family, grid, emptyState, localItems = null) {
-    const size = Math.max(12, Number(BWS.getSettings().pageSize) || 30);
-    const all = [];
-    let page = 1, total = 0, loading = false, done = false;
+// Category view: TRUE server pagination — 15 products per page with clear
+// السابق/التالي buttons. Each page is fetched on demand from the server
+// (`/api/products?family=&limit=15&offset=`), which reads only that page's rows
+// from Supabase — the whole category is NEVER loaded at once. Page 1 may come
+// preloaded by bootstrap (same shape) to save one request.
+async function renderFamilyPaged(family, grid, emptyState) {
+    const size = 15; // الحد الأقصى للمنتجات داخل التصنيف لكل صفحة
+    let page = 1;
 
     grid.style.display = '';
     emptyState.style.display = 'none';
-    grid.innerHTML = loadingHtml();
 
-    // A sentinel placed after the grid; when it scrolls into view we load more.
     const section = grid.closest('.content-section') || grid.parentElement;
-    let sentinel = document.getElementById('gridSentinel');
-    if (!sentinel) {
-        sentinel = document.createElement('div');
-        sentinel.id = 'gridSentinel';
-        sentinel.className = 'grid-sentinel';
-        section.appendChild(sentinel);
-    }
-    sentinel.style.display = 'none';
-
-    let observer = null;
-    const finish = () => {
-        done = true;
-        sentinel.style.display = 'none';
-        if (observer) observer.disconnect();
-    };
-
-    // Render one page's products (shared by the bootstrap preload + loadNext).
-    function appendPage(products) {
-        if (page === 1) {
-            grid.innerHTML = ''; // clear the skeleton
-            if (products.length === 0) {
-                grid.style.display = 'none';
-                emptyState.style.display = 'block';
-                finish();
-                return;
-            }
-        }
-        all.push(...products);
-        grid.insertAdjacentHTML('beforeend', products.map(renderProductCard).join(''));
-        wireProductCards(grid, all, false);
-        setupPriceTierBar(all, grid, false);
-        deferHydrate(grid);
-
-        page += 1;
-        if (all.length >= total || products.length < size) {
-            finish();
-        } else {
-            sentinel.textContent = '';
-            sentinel.style.display = '';
-            // If the page didn't fill the viewport, keep going.
-            requestAnimationFrame(() => {
-                const r = sentinel.getBoundingClientRect();
-                if (r.top < window.innerHeight + 200) loadNext();
-            });
-        }
+    let pager = document.getElementById('familyPager');
+    if (!pager) {
+        pager = document.createElement('div');
+        pager.id = 'familyPager';
+        pager.className = 'products-pager';
+        section.appendChild(pager);
     }
 
-    async function loadNext() {
-        if (loading || done) return;
-        loading = true;
-        if (page > 1) sentinel.textContent = 'جاري التحميل...';
+    function renderPager(total) {
+        const pages = Math.max(1, Math.ceil(total / size));
+        if (pages <= 1) { pager.innerHTML = ''; return; }
+        pager.innerHTML = `
+            <button class="pager-btn" id="famPrev" ${page <= 1 ? 'disabled' : ''}>◄ السابق</button>
+            <span class="pager-info">صفحة ${page} من ${pages}</span>
+            <button class="pager-btn" id="famNext" ${page >= pages ? 'disabled' : ''}>التالي ►</button>
+        `;
+        document.getElementById('famPrev')?.addEventListener('click', () => { if (page > 1) loadPage(page - 1); });
+        document.getElementById('famNext')?.addEventListener('click', () => { if (page < pages) loadPage(page + 1); });
+    }
 
-        // Local source: paginate the prefetched catalog in memory (instant).
-        if (localItems) {
-            total = localItems.length;
-            const start = (page - 1) * size;
-            appendPage(localItems.slice(start, start + size));
-            loading = false;
+    // Render a page's products (shared by the preload + fetched pages).
+    function showPage(products, total) {
+        if (!products.length) {
+            grid.innerHTML = '';
+            grid.style.display = 'none';
+            emptyState.style.display = 'block';
+            pager.innerHTML = '';
             return;
         }
+        grid.style.display = '';
+        emptyState.style.display = 'none';
+        grid.innerHTML = products.map(renderProductCard).join('');
+        wireProductCards(grid, products, false);
+        setupPriceTierBar(products, grid, false);
+        deferHydrate(grid);
+        renderPager(total);
+    }
 
+    async function loadPage(p) {
+        page = p;
+        grid.style.display = '';
+        emptyState.style.display = 'none';
+        grid.innerHTML = loadingHtml();
         let res;
         try {
             res = await BWS.fetchProductsForFamilyPaged(family.name, { page, pageSize: size });
         } catch (err) {
-            loading = false;
-            if (page === 1) {
-                grid.innerHTML = '';
-                grid.style.display = 'none';
-                emptyState.style.display = 'block';
-                emptyState.innerHTML = `<p>${escapeHtml(err.message || 'تعذّر تحميل المنتجات')}</p>`;
-                finish();
-            }
+            grid.innerHTML = '';
+            grid.style.display = 'none';
+            emptyState.style.display = 'block';
+            emptyState.innerHTML = `<p>${escapeHtml(err.message || 'تعذّر تحميل المنتجات')}</p>`;
+            pager.innerHTML = '';
             return;
         }
-        total = res.total || 0;
-        appendPage(res.products || []);
-        loading = false;
+        showPage(res.products || [], res.total || 0);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    if ('IntersectionObserver' in window) {
-        observer = new IntersectionObserver((entries) => {
-            if (entries.some(e => e.isIntersecting)) loadNext();
-        }, { rootMargin: '400px 0px' });
-        observer.observe(sentinel);
-    }
-
-    // Bootstrap preloads the whole category in one request → paginate it in
-    // memory here (instant, no per-page network). Older shapes that carry only
-    // page 1 (or an explicit localItems source) fall back to the paged fetch.
-    if (localItems) {
-        await loadNext();
+    // Use bootstrap's preloaded page 1 (if present) to avoid a duplicate request.
+    const pre = BWS.takePreloadedFamilyPage(family.id);
+    if (pre && Array.isArray(pre.products)) {
+        page = 1;
+        showPage(pre.products, pre.total || pre.products.length);
     } else {
-        const pre = BWS.takePreloadedFamilyPage(family.id);
-        if (pre && pre.complete) {
-            localItems = pre.products;   // whole family → in-memory pagination
-            await loadNext();
-        } else if (pre) {
-            total = pre.total;
-            appendPage(pre.products);
-        } else {
-            await loadNext();
-        }
+        grid.innerHTML = loadingHtml();
+        await loadPage(1);
     }
 }
 
