@@ -104,7 +104,11 @@ export async function resolveTenant(req) {
         if (slug && slug !== 'www') {
             return _cache.bySlug.get(slug) || null;
         }
-        return null; // a subdomain host that isn't registered → no tenant
+        // `www.<root>` is the platform host (not a store subdomain) — fall
+        // through to explicit ?store= resolution below, exactly like the apex
+        // and preview hosts. Otherwise guests on www couldn't resolve a store
+        // (so 'direct' mode would wrongly 401), while colors/settings — read
+        // post-login from the session — kept working, causing a confusing split.
     }
 
     // 3) Platform/preview host (e.g. *.vercel.app or apex) → explicit slug.
