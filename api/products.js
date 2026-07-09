@@ -33,6 +33,9 @@ export default async function handler(req, res) {
 
         const familyFilter = (req.query?.family || '').toString().trim();
         const favoritesOnly = String(req.query?.favorites || '') === '1';
+        // بحث نصّي بالاسم (من تطبيق المتجر) — يُصفّى على الخادم فلا يُنزَّل الكتالوج
+        // كاملاً إلى الهاتف؛ يُعاد فقط صفحة النتائج المطابقة.
+        const q = (req.query?.q || '').toString().trim().toLowerCase();
         // Optional server-side pagination (used by the "all products" storefront
         // mode). limit<=0 / missing → return everything.
         const limit = Math.max(0, parseInt(req.query?.limit, 10) || 0);
@@ -64,8 +67,8 @@ export default async function handler(req, res) {
 
         // ── المسار المُحسَّن: تصفّح عائلة بترقيم صفحات ──
         // نقرأ صفحة الـ limit فقط من Supabase (لا الكتالوج كاملاً) → قراءات أقل.
-        // يُستخدم فقط مع (عائلة محدّدة + ليس المفضّلة + limit>0). أي خطأ → تراجُع.
-        if (familyFilter && !favoritesOnly && limit > 0) {
+        // يُستخدم فقط مع (عائلة محدّدة + ليس المفضّلة + بلا بحث نصّي + limit>0). أي خطأ → تراجُع.
+        if (familyFilter && !favoritesOnly && !q && limit > 0) {
             try {
                 const { products: pageRows, total } = await getSupabaseFamilyPage(
                     storeId, familyFilter, { hideOOS, limit, offset });
@@ -91,6 +94,8 @@ export default async function handler(req, res) {
             // المنتج قد يحمل عدّة عائلات محزومة في `family` ("A~@~B")؛ نطابق
             // الاحتواء بدل التطابق التام ليظهر تحت كلٍّ من عائلاته.
             if (familyFilter && !splitFamilies(p.family).includes(familyFilter)) continue;
+            // بحث نصّي بالاسم (احتواء، غير حسّاس للحالة).
+            if (q && !(p.name || '').toLowerCase().includes(q)) continue;
             const isFavorite = favSet.has(p.uuid);
             if (favoritesOnly && !isFavorite) continue;
             const proj = projectProductPrices(p, allowed, pricePerProduct);
