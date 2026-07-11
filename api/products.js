@@ -1,6 +1,7 @@
 import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess, getStoreSettings } from './_lib/access.js';
-import { getSupabaseCatalog, getSupabaseFamilyPage } from './_lib/supabase.js';
+// قراءة عبر الموجّه: Turso (bws_products) إن كان المتجر منسوخًا، وإلا Supabase.
+import { getCatalog, getFamilyPage } from './_lib/turso-catalog.js';
 import { splitFamilies } from './_lib/families.js';
 import { buyerPricing, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
 
@@ -30,6 +31,18 @@ export default async function handler(req, res) {
         }
         const storeId = access.storeId;
         const session = access.session; // undefined for guests
+
+        // كاش الحافة (Edge/CDN) للضيوف: الرد نفسه لكل ضيوف المتجر المباشر، فيُخزَّن
+        // على Vercel Edge ويتشاركه الجميع → قراءات Supabase/Turso أقل بكثير.
+        // المسجّلون يبقون private (فيهم مفضلة/أسعار خاصة). Vary يمنع خلط المتاجر.
+        const setCacheHeaders = () => {
+            if (access.guest) {
+                res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+                res.setHeader('Vary', 'x-store-slug');
+            } else {
+                res.setHeader('Cache-Control', 'private, max-age=15');
+            }
+        };
 
         const familyFilter = (req.query?.family || '').toString().trim();
         const favoritesOnly = String(req.query?.favorites || '') === '1';
@@ -70,14 +83,14 @@ export default async function handler(req, res) {
         // يُستخدم فقط مع (عائلة محدّدة + ليس المفضّلة + بلا بحث نصّي + limit>0). أي خطأ → تراجُع.
         if (familyFilter && !favoritesOnly && !q && limit > 0) {
             try {
-                const { products: pageRows, total } = await getSupabaseFamilyPage(
+                const { products: pageRows, total } = await getFamilyPage(
                     storeId, familyFilter, { hideOOS, limit, offset });
                 const products = pageRows.map((p) => {
                     const proj = projectProductPrices(p, allowed, pricePerProduct);
                     proj.isFavorite = favSet.has(p.uuid);
                     return proj;
                 });
-                res.setHeader('Cache-Control', 'private, max-age=15');
+                setCacheHeaders();
                 res.status(200).json({ products, total });
                 return;
             } catch (e) {
@@ -86,8 +99,8 @@ export default async function handler(req, res) {
             }
         }
 
-        // Whole catalogue — read only from Supabase (current-state table).
-        const catalog = await getSupabaseCatalog(storeId);
+        // كامل الكتالوج (حالة حالية) — Turso إن مُنسِخ، وإلا Supabase.
+        const catalog = await getCatalog(storeId);
         const products = [];
         for (const p of catalog) {
             if (hideOOS && !p.available) continue;
@@ -106,7 +119,7 @@ export default async function handler(req, res) {
         const total = products.length;
         const paged = limit > 0 ? products.slice(offset, offset + limit) : products;
 
-        res.setHeader('Cache-Control', 'private, max-age=15');
+        setCacheHeaders();
         res.status(200).json({ products: paged, total });
     } catch (err) {
         console.error('[products] error', err);

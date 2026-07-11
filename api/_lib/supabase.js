@@ -31,6 +31,23 @@ function sbConfig() {
     return { url: url.replace(/\/+$/, ''), key };
 }
 
+// ── كاش قصير في الذاكرة (لكل نسخة دالة serverless) يقلّل قراءات Supabase ──
+// المتكرّرة للكتالوج/العائلات/الصفحات. TTL قصير يوازن بين قلّة القراءات وحداثة
+// البيانات (تغييرات المنتجات تظهر خلال ثوانٍ). القيم المخزّنة لا تُعدَّل لاحقًا
+// (projectProductPrices ينسخ الكائن) فالمشاركة آمنة.
+const _memo = new Map();
+const MEMO_TTL_MS = 45 * 1000;
+function memoGet(key) {
+    const e = _memo.get(key);
+    if (e && Date.now() - e.at < MEMO_TTL_MS) return e.val;
+    return undefined;
+}
+function memoSet(key, val) {
+    if (_memo.size > 500) _memo.clear(); // حدّ أمان ضد نمو غير محدود
+    _memo.set(key, { at: Date.now(), val });
+    return val;
+}
+
 async function sbGet(path) {
     const { url, key } = sbConfig();
     const res = await fetch(`${url}/rest/v1/${path}`, {
@@ -128,13 +145,15 @@ function shapeProduct(storeId, row) {
  * Hidden products (web_visible=false) are excluded server-side.
  */
 export async function getSupabaseCatalog(storeId) {
+    const hit = memoGet(`cat:${storeId}`);
+    if (hit) return hit;
     const q = `products?store_id=eq.${encodeURIComponent(storeId)}` +
               `&web_visible=eq.true&select=${PRODUCT_COLUMNS}&order=uuid.asc`;
     const rows = await sbGetAll(q);
     const products = rows.map((row) => shapeProduct(storeId, row));
     // Preserve the exact Arabic ordering the Turso path used.
     products.sort((a, b) => a.name.localeCompare(b.name, 'ar'));
-    return products;
+    return memoSet(`cat:${storeId}`, products);
 }
 
 /**
@@ -147,6 +166,9 @@ export async function getSupabaseCatalog(storeId) {
  * يعيد { products: [مُشكَّلة], total }. يرمي عند الخطأ (المستدعي يتراجع للكتالوج).
  */
 export async function getSupabaseFamilyPage(storeId, familyName, { hideOOS = false, limit = 30, offset = 0 } = {}) {
+    const memoKey = `page:${storeId}|${familyName}|${hideOOS ? 1 : 0}|${limit}|${offset}`;
+    const hit = memoGet(memoKey);
+    if (hit) return hit;
     const { url, key } = sbConfig();
     const sep = '~@~';
     // نُهرّب اسم العائلة للاستعمال داخل قيم PostgREST. الأسماء الشائعة (عربية/
@@ -182,7 +204,7 @@ export async function getSupabaseFamilyPage(storeId, familyName, { hideOOS = fal
     const m = cr.match(/\/(\d+)\s*$/);
     const total = m ? Number(m[1]) : (Array.isArray(rows) ? rows.length : 0);
     const products = (Array.isArray(rows) ? rows : []).map((row) => shapeProduct(storeId, row));
-    return { products, total };
+    return memoSet(memoKey, { products, total });
 }
 
 /**
@@ -192,11 +214,13 @@ export async function getSupabaseFamilyPage(storeId, familyName, { hideOOS = fal
  * deletion/tombstone handling is needed here.
  */
 export async function getSupabaseFamilies(storeId) {
+    const hit = memoGet(`fam:${storeId}`);
+    if (hit) return hit;
     const q = `families?store_id=eq.${encodeURIComponent(storeId)}` +
               `&select=family_id,parent_id,name,uuid,image_version&order=family_id.asc`;
     const rows = await sbGetAll(q);
 
-    return rows.map((row) => {
+    const families = rows.map((row) => {
         const uuid = String(row.uuid || '').trim();
         const imageVersion = String(row.image_version || '').trim();
         return {
@@ -209,4 +233,5 @@ export async function getSupabaseFamilies(storeId) {
             imageUrlLegacy: (uuid && imageVersion) ? familyImageUrlLegacy(uuid, imageVersion) : ''
         };
     });
+    return memoSet(`fam:${storeId}`, families);
 }
