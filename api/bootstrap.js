@@ -4,6 +4,7 @@ import { resolveTenant } from './_lib/tenant.js';
 import { getCatalog, getFamilies, getFamilyPage } from './_lib/turso-catalog.js';
 import { storeLogoUrl } from './_lib/r2.js';
 import { buyerPricing, projectProductPrices } from './_lib/pricing.js';
+import { getStoreDiscounts, applyDiscount } from './_lib/discounts.js';
 import { splitFamilies } from './_lib/families.js';
 
 /**
@@ -116,7 +117,14 @@ export default async function handler(req, res) {
         // مستويات الأسعار المسموحة للمشتري — تُسقَط على كل المنتجات المُعادة كي لا
         // تُكشف باقي المستويات (الجملة/الخاصة) للزبون.
         const { allowed, pricePerProduct } = buyerPricing(loggedIn ? session : null, guestTier || 1);
-        const projectP = (p) => projectProductPrices(p, allowed, pricePerProduct);
+        // تخفيضات المتجر (يضبطها الأدمين) — تُطبَّق على كل منتج مُعاد.
+        let discounts = new Map();
+        try { discounts = await getStoreDiscounts(storeId); } catch { /* لا تخفيضات */ }
+        const projectP = (p) => {
+            const proj = projectProductPrices(p, allowed, pricePerProduct);
+            applyDiscount(proj, discounts.get(p.uuid));
+            return proj;
+        };
 
         // ----- 4. Store branding + families -----
         // Read independently (NOT one batch): turso_deleted_properties only

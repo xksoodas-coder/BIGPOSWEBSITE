@@ -83,8 +83,9 @@ export default async function handler(req, res) {
                 return;
             }
             const json = JSON.stringify(incoming);
-            // حدّ حجم وقائي (≈ 256KB) لمنع تخزين حمولة ضخمة.
-            if (json.length > 256 * 1024) {
+            // حدّ حجم وقائي (≈ 768KB) لمنع تخزين حمولة ضخمة.
+            // رُفِع من 256KB ليتّسع لصور البانر الإعلاني (حتى 4) المخزّنة كـ base64.
+            if (json.length > 768 * 1024) {
                 res.status(413).json({ error: 'حجم الإعدادات كبير جدًا' });
                 return;
             }

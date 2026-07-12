@@ -2,6 +2,7 @@ import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess } from './_lib/access.js';
 import { productImageUrl, productImageUrlLegacy } from './_lib/r2.js';
 import { buyerPricing, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
+import { getStoreDiscounts, applyDiscount } from './_lib/discounts.js';
 
 /**
  * GET /api/product?uuid=<recordUuid>
@@ -102,6 +103,12 @@ export default async function handler(req, res) {
             price7: Number(ex[3] ?? 0)
         }, allowed, pricePerProduct);
 
+        // تخفيض هذا المنتج (إن وُجد) — يضبطه الأدمين.
+        try {
+            const discounts = await getStoreDiscounts(access.storeId);
+            applyDiscount(priced, discounts.get(uuid));
+        } catch { /* بلا تخفيض */ }
+
         res.setHeader('Cache-Control', 'private, max-age=30');
         res.status(200).json({
             uuid,
@@ -109,6 +116,8 @@ export default async function handler(req, res) {
             shortDescription,
             description,
             price: priced.price,
+            oldPrice: priced.oldPrice ?? 0,
+            discountPercent: priced.discountPercent ?? 0,
             price1: priced.price1,
             price2: priced.price2,
             price3: priced.price3,
