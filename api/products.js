@@ -1,13 +1,10 @@
 import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess, getStoreSettings } from './_lib/access.js';
-import { readSessionFromRequest } from './_lib/session.js';
 // قراءة عبر الموجّه: Turso (bws_products) إن كان المتجر منسوخًا، وإلا Supabase.
-import { getCatalog, getFamilyPage, getTursoCatalog } from './_lib/turso-catalog.js';
+import { getCatalog, getFamilyPage } from './_lib/turso-catalog.js';
 import { splitFamilies } from './_lib/families.js';
 import { buyerPricing, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
-import {
-    getStoreDiscounts, applyDiscount, ensureDiscountTable, invalidateDiscounts
-} from './_lib/discounts.js';
+import { getStoreDiscounts, applyDiscount } from './_lib/discounts.js';
 
 /**
  * GET /api/products?family=<name>&favorites=1&limit=&offset=
@@ -21,17 +18,9 @@ import {
  * happens at most once per snapshot TTL.
  */
 export default async function handler(req, res) {
-    // ── مسار الأدمين (تطبيق SOFT ADMIN MANAGER): إدارة تخفيضات المنتجات ──
-    // مدمج هنا (بدل دالة مستقلّة) لتفادي تجاوز حدّ عدد دوال Vercel.
-    if (req.method === 'POST') {
-        return handleAdminDiscountPost(req, res);
-    }
     if (req.method !== 'GET') {
         res.status(405).json({ error: 'Method not allowed' });
         return;
-    }
-    if (String(req.query?.admin || '') === '1') {
-        return handleAdminProductsList(req, res);
     }
 
     try {
@@ -141,112 +130,5 @@ export default async function handler(req, res) {
     } catch (err) {
         console.error('[products] error', err);
         res.status(500).json({ error: 'تعذّر تحميل المنتجات' });
-    }
-}
-
-// ── الأدمين: قائمة منتجات المتجر مع تخفيضاتها الحالية (بحث بالاسم) ──
-// GET /api/products?admin=1&q=<بحث>&limit=  (توكن أدمين). يُعيد نتائج البحث فقط
-// (لا يُحمَّل الكتالوج كاملاً على الواجهة إلا عند الطلب).
-async function handleAdminProductsList(req, res) {
-    try {
-        const session = readSessionFromRequest(req);
-        if (!session || !session.storeId) {
-            res.status(401).json({ error: 'يجب تسجيل الدخول' });
-            return;
-        }
-        if (!session.isAdmin) {
-            res.status(403).json({ error: 'صلاحية الإدارة مطلوبة' });
-            return;
-        }
-        const storeId = session.storeId;
-        const q = (req.query?.q || '').toString().trim().toLowerCase();
-        const limit = Math.min(80, Math.max(1, parseInt(req.query?.limit, 10) || 50));
-
-        const [catalog, discounts] = await Promise.all([
-            getTursoCatalog(storeId),
-            getStoreDiscounts(storeId)
-        ]);
-
-        const out = [];
-        for (const p of catalog) {
-            if (q && !(p.name || '').toLowerCase().includes(q)) continue;
-            const d = discounts.get(p.uuid) || null;
-            out.push({
-                uuid: p.uuid,
-                name: p.name,
-                family: p.family,
-                price1: p.price1,
-                imageUrl: p.imageUrl,
-                imageUrlLegacy: p.imageUrlLegacy,
-                discount: d ? { type: d.type, value: d.value } : null
-            });
-            if (out.length >= limit) break;
-        }
-        res.setHeader('Cache-Control', 'no-store');
-        res.status(200).json({ products: out });
-    } catch (err) {
-        console.error('[products admin-list] error', err);
-        res.status(500).json({ error: 'تعذّر تحميل المنتجات' });
-    }
-}
-
-// ── الأدمين: ضبط/حذف تخفيض منتج ──
-// POST /api/products  body: { productUuid, discount: {type,value} | null }  (توكن أدمين)
-async function handleAdminDiscountPost(req, res) {
-    try {
-        const session = readSessionFromRequest(req);
-        if (!session || !session.storeId) {
-            res.status(401).json({ error: 'يجب تسجيل الدخول' });
-            return;
-        }
-        if (!session.isAdmin) {
-            res.status(403).json({ error: 'صلاحية الإدارة مطلوبة' });
-            return;
-        }
-        const storeId = session.storeId;
-        const uuid = (req.body?.productUuid || '').toString().trim();
-        if (!uuid) {
-            res.status(400).json({ error: 'معرّف المنتج مطلوب' });
-            return;
-        }
-        const client = getTursoClient();
-        await ensureDiscountTable(client);
-
-        const disc = req.body?.discount;
-        if (disc == null) {
-            await client.execute({
-                sql: `DELETE FROM bws_product_discounts WHERE store_id = ? AND product_uuid = ?`,
-                args: [storeId, uuid]
-            });
-            invalidateDiscounts(storeId);
-            res.status(200).json({ ok: true });
-            return;
-        }
-
-        const type = (disc.type || '').toString();
-        const value = Number(disc.value);
-        if ((type !== 'price' && type !== 'percent') || !Number.isFinite(value) || value <= 0) {
-            res.status(400).json({ error: 'قيمة التخفيض غير صالحة' });
-            return;
-        }
-        if (type === 'percent' && value >= 100) {
-            res.status(400).json({ error: 'النسبة يجب أن تكون أقلّ من 100' });
-            return;
-        }
-
-        await client.execute({
-            sql: `INSERT INTO bws_product_discounts (store_id, product_uuid, disc_type, disc_value, updated_at)
-                  VALUES (?, ?, ?, ?, ?)
-                  ON CONFLICT(store_id, product_uuid) DO UPDATE SET
-                      disc_type  = excluded.disc_type,
-                      disc_value = excluded.disc_value,
-                      updated_at = excluded.updated_at`,
-            args: [storeId, uuid, type, value, new Date().toISOString()]
-        });
-        invalidateDiscounts(storeId);
-        res.status(200).json({ ok: true });
-    } catch (err) {
-        console.error('[products admin-discount] error', err);
-        res.status(500).json({ error: 'تعذّر تنفيذ العملية' });
     }
 }
