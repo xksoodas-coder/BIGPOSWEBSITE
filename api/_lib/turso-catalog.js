@@ -1,13 +1,9 @@
 // ============================================================================
-//  طبقة قراءة المنتجات/العائلات من Turso (جدول bws_products + turso_families).
-//
-//  الغرض: تجريب قراءة الكتالوج من Turso بدل Supabase. الدوال تُعيد كائنات بشكل
-//  مطابق تمامًا لدوال supabase.js (getSupabaseCatalog/…) فتستبدلها بلا تغيير في
-//  المستدعي.
-//
-//  التوجيه الآمن (getCatalog/getFamilyPage/getFamilies): إن كان للمتجر صفوف في
-//  bws_products → يُقرأ من Turso؛ وإلا → يتراجع إلى Supabase (فلا يتعطّل متجر لم
-//  يُنسخ بعد إلى bws_products).
+//  طبقة قراءة المنتجات/العائلات من Turso — المصدر الوحيد للموقع (لا Supabase).
+//    • المنتجات (الحالة الحالية): جدول bws_products (يملؤه الهاتف).
+//    • العائلات: turso_families (+ tombstones في turso_deleted_properties).
+//  الدوال getCatalog/getFamilyPage/getFamilies هي الأسماء الموحّدة للمستدعين
+//  (products.js / categories.js / orders.js / bootstrap.js).
 // ============================================================================
 
 import { getTursoClient } from './turso.js';
@@ -16,9 +12,6 @@ import {
     familyImageUrl, familyImageUrlLegacy
 } from './r2.js';
 import { flattenFamilies } from './families.js';
-import {
-    getSupabaseCatalog, getSupabaseFamilyPage, getSupabaseFamilies
-} from './supabase.js';
 
 // كاش قصير في الذاكرة (لكل نسخة دالة) يقلّل قراءات Turso المتكرّرة.
 const _memo = new Map();
@@ -73,22 +66,7 @@ function shapeProduct(storeId, row) {
     };
 }
 
-/** هل للمتجر منتجات في bws_products؟ (يُقرّر مصدر القراءة). مخزَّن مؤقتًا. */
-export async function tursoHasCatalog(storeId) {
-    const hit = memoGet(`has:${storeId}`);
-    if (hit !== undefined) return hit;
-    let val = false;
-    try {
-        const r = await getTursoClient().execute({
-            sql: 'SELECT 1 FROM bws_products WHERE store_id = ? LIMIT 1',
-            args: [storeId]
-        });
-        val = r.rows.length > 0;
-    } catch { val = false; } // الجدول قد لا يكون موجودًا بعد
-    return memoSet(`has:${storeId}`, val);
-}
-
-/** كل منتجات المتجر (web_visible=1)، مرتّبة بالاسم عربيًا — كـ getSupabaseCatalog. */
+/** كل منتجات المتجر (web_visible=1)، مرتّبة بالاسم عربيًا. */
 export async function getTursoCatalog(storeId) {
     const hit = memoGet(`cat:${storeId}`);
     if (hit) return hit;
@@ -138,15 +116,13 @@ export async function getTursoFamilies(storeId) {
     return memoSet(`fam:${storeId}`, families);
 }
 
-// ── توجيه: Turso إن كان للمتجر بيانات في bws_products، وإلا Supabase (تراجُع آمن) ──
+// ── الموقع يقرأ من Turso فقط (لا Supabase) — أسماء موحّدة للمستدعين ──
 export async function getCatalog(storeId) {
-    return (await tursoHasCatalog(storeId)) ? getTursoCatalog(storeId) : getSupabaseCatalog(storeId);
+    return getTursoCatalog(storeId);
 }
 export async function getFamilyPage(storeId, familyName, opts) {
-    return (await tursoHasCatalog(storeId))
-        ? getTursoFamilyPage(storeId, familyName, opts)
-        : getSupabaseFamilyPage(storeId, familyName, opts);
+    return getTursoFamilyPage(storeId, familyName, opts);
 }
 export async function getFamilies(storeId) {
-    return (await tursoHasCatalog(storeId)) ? getTursoFamilies(storeId) : getSupabaseFamilies(storeId);
+    return getTursoFamilies(storeId);
 }

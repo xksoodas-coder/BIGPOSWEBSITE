@@ -1,7 +1,7 @@
 import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
 import { resolveTenant } from './_lib/tenant.js';
-import { getSupabaseCatalog, getSupabaseFamilies, getSupabaseFamilyPage } from './_lib/supabase.js';
+import { getCatalog, getFamilies, getFamilyPage } from './_lib/turso-catalog.js';
 import { storeLogoUrl } from './_lib/r2.js';
 import { buyerPricing, projectProductPrices } from './_lib/pricing.js';
 import { splitFamilies } from './_lib/families.js';
@@ -148,9 +148,9 @@ export default async function handler(req, res) {
             }
         } catch { /* store info table may not exist yet */ }
 
-        // Families — read only from Supabase.
-        try { families = await getSupabaseFamilies(storeId); }
-        catch (e) { console.error('[families] supabase error:', e?.message || e); families = null; }
+        // Families — read only from Turso (turso_families).
+        try { families = await getFamilies(storeId); }
+        catch (e) { console.error('[families] turso error:', e?.message || e); families = null; }
 
         // ----- 5. First products page — folds the category page's 2nd request
         // into this one. familyId → first page of that category; display=products
@@ -174,7 +174,7 @@ export default async function handler(req, res) {
                     // لا نقرأ كامل الكتالوج. البقية تُجلب صفحةً-صفحة عند التقليب.
                     const fam = Array.isArray(families) ? families.find(f => f.id === familyIdQ) : null;
                     if (fam) {
-                        const { products: pageRows, total } = await getSupabaseFamilyPage(
+                        const { products: pageRows, total } = await getFamilyPage(
                             storeId, fam.name, { hideOOS, limit: size, offset: 0 });
                         const flist = pageRows.map(p => ({ ...projectP(p), isFavorite: false }));
                         products = { products: flist, total, familyId: familyIdQ, size, complete: false };
@@ -183,7 +183,7 @@ export default async function handler(req, res) {
                     }
                 } else {
                     // All-products home: keep server pagination (it's the whole catalog).
-                    const catalog = await getSupabaseCatalog(storeId);
+                    const catalog = await getCatalog(storeId);
                     const list = hideOOS ? catalog.filter(p => p.available) : catalog;
                     const total = list.length;
                     const paged = list.slice(0, size).map(p => ({ ...projectP(p), isFavorite: false }));
@@ -206,7 +206,7 @@ export default async function handler(req, res) {
         const productQ = (req.query?.product || '').toString().trim();
         if (productQ) {
             try {
-                const catalog = await getSupabaseCatalog(storeId);
+                const catalog = await getCatalog(storeId);
                 const sel = catalog.find(p => p.uuid === productQ);
                 if (sel) {
                     // Descriptions are website-only (not in the changelog/catalog).

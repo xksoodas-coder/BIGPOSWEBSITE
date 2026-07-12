@@ -1,5 +1,5 @@
 import { resolveReadAccess } from './_lib/access.js';
-// قراءة عبر الموجّه: عائلات Turso إن كان المتجر منسوخًا، وإلا Supabase.
+// العائلات تُقرأ من Turso (turso_families).
 import { getFamilies } from './_lib/turso-catalog.js';
 
 /**
@@ -24,10 +24,10 @@ export default async function handler(req, res) {
             return;
         }
 
-        // Families — read only from Supabase.
+        // Families — read only from Turso (turso_families).
         let families = [];
         try { families = await getFamilies(access.storeId); }
-        catch (e) { console.error('[categories] supabase error:', e?.message || e); families = []; }
+        catch (e) { console.error('[categories] turso error:', e?.message || e); families = []; }
 
         // كاش الحافة للضيوف (متجر مباشر) — نفس التصنيفات للجميع فتُخزَّن على Edge.
         // المسجّلون يبقون private. Vary يمنع خلط المتاجر على المضيف المشترك.
