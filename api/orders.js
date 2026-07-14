@@ -160,7 +160,9 @@ export default async function handler(req, res) {
                     ? it.sizes.map(s => ({
                         name: String(s.name || ''),
                         capacity: Number(s.capacity) || 0,
-                        qty: Number(s.qty) || 0
+                        qty: Number(s.qty) || 0,
+                        // سعر بيع الصندوق (يُتحقّق منه من الكتالوج أدناه، لا يُوثق كما هو).
+                        price: Number(s.price) || 0
                     })).filter(s => s.name && s.qty > 0)
                     : []
             })).filter(it => it.name && it.quantity > 0);
@@ -267,9 +269,25 @@ export default async function handler(req, res) {
                 const tiers = (pricePerProduct && usable.length) ? usable : [allowedTiers[0]];
                 const allowedPrices = tiers.map(t => priceForTier(prod, t));
                 const submitted = Number(it.price || 0);
-                // نقبل سعر العميل فقط إن طابق سعر مستوى مسموح؛ وإلا نفرض سعر الخادم.
-                const matched = allowedPrices.find(ap => Math.abs(ap - submitted) < 0.01);
-                it.price = (matched != null) ? matched : allowedPrices[0];
+
+                // بند بالصندوق: السعر الموثوق = سعر الصندوق من الكتالوج (المصدر)،
+                // وإلا سعر مستوى المشتري × سعة الصندوق. لا نفرض سعر الوحدة (كان يُفسد
+                // إجمالي الطلب بالصندوق).
+                const box = (Array.isArray(it.sizes) && it.sizes.length &&
+                    Number(it.sizes[0].capacity) > 0) ? it.sizes[0] : null;
+                if (box) {
+                    const prodSize = Array.isArray(prod.sizes)
+                        ? prod.sizes.find(s => s.name === box.name) : null;
+                    const trustedBox = (prodSize && Number(prodSize.boxPrice) > 0)
+                        ? Number(prodSize.boxPrice)
+                        : allowedPrices[0] * Number(box.capacity);
+                    it.price = (Math.abs(trustedBox - submitted) < 0.01) ? submitted : trustedBox;
+                    box.price = it.price; // نثبّت سعر الصندوق الموثوق في التفصيل
+                } else {
+                    // نقبل سعر العميل فقط إن طابق سعر مستوى مسموح؛ وإلا نفرض سعر الخادم.
+                    const matched = allowedPrices.find(ap => Math.abs(ap - submitted) < 0.01);
+                    it.price = (matched != null) ? matched : allowedPrices[0];
+                }
             }
 
             const total = cleanItems.reduce((s, it) => s + it.price * it.quantity, 0);
