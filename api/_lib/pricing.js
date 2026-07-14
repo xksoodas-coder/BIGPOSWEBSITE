@@ -6,15 +6,23 @@
  * storefront keeps working.
  */
 
-/** { allowed: number[], pricePerProduct: bool } for a buyer (session or guest). */
+/** { allowed: number[], pricePerProduct: bool } for a buyer (session or guest).
+ *
+ * سعر الموقع (guestTier) صار الافتراضي للجميع — الزائر **والزبون المسجّل** —
+ * إلا إذا كان للزبون سعر خاص. الزبون الافتراضي (سعر 1 فقط) يُعامَل كالزائر
+ * فيتبع سعر الموقع؛ أما الزبون الذي له سعر خاص (يشمل مستوى غير 1) فيُستعمل سعره.
+ */
 export function buyerPricing(session, guestTier) {
+    const g = (guestTier >= 1 && guestTier <= 7) ? guestTier : 1;
     if (session) {
         const t = (Array.isArray(session.priceTiers) ? session.priceTiers : [])
             .map(Number).filter(n => n >= 1 && n <= 7);
-        const allowed = t.length ? Array.from(new Set(t)).sort((a, b) => a - b) : [1];
+        const unique = Array.from(new Set(t)).sort((a, b) => a - b);
+        // بلا سعر خاص (فارغ أو سعر 1 فقط) → اتبع سعر الموقع.
+        const isDefault = unique.length === 0 || (unique.length === 1 && unique[0] === 1);
+        const allowed = isDefault ? [g] : unique;
         return { allowed, pricePerProduct: session.pricePerProduct === true && allowed.length > 1 };
     }
-    const g = (guestTier >= 1 && guestTier <= 7) ? guestTier : 1;
     return { allowed: [g], pricePerProduct: false };
 }
 

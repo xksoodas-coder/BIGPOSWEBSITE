@@ -90,8 +90,8 @@ export default async function handler(req, res) {
             }
         } catch { /* table may not exist yet */ }
 
-        // مستويات الأسعار المسموحة للمشتري — لا نكشف باقي المستويات.
-        const gt = access.session ? 1 : await guestPriceTier(client, access.storeId);
+        // سعر الموقع = الافتراضي للجميع (زائر ومسجّل بلا سعر خاص). نجلبه دائمًا.
+        const gt = await guestPriceTier(client, access.storeId);
         const { allowed, pricePerProduct } = buyerPricing(access.session, gt);
         const priced = projectProductPrices({
             price1: Number(full.sellPrice ?? 0),

@@ -38,7 +38,12 @@ function shapeProduct(storeId, row) {
         const s = JSON.parse(row.sizes || '[]');
         if (Array.isArray(s)) {
             sizes = s
-                .map((x) => ({ name: String(x.name ?? ''), capacity: Number(x.capacity ?? 0) }))
+                .map((x) => ({
+                    name: String(x.name ?? ''),
+                    capacity: Number(x.capacity ?? 0),
+                    // سعر بيع الصندوق (0 = غير محدَّد → يُحسب من سعر الوحدة × السعة).
+                    boxPrice: Number(x.box_price ?? x.boxPrice ?? 0)
+                }))
                 .filter((x) => x.name && x.capacity > 0);
         }
     } catch { /* sizes تالف → [] */ }

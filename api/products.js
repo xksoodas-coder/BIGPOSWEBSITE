@@ -75,8 +75,8 @@ export default async function handler(req, res) {
         const settings = await getStoreSettings(storeId);
         const hideOOS = settings.showOutOfStock === false;
 
-        // مستويات الأسعار المسموحة للمشتري — لا نكشف باقي المستويات (الجملة...).
-        const gt = session ? 1 : await guestPriceTier(client, storeId);
+        // سعر الموقع = الافتراضي للجميع (زائر ومسجّل بلا سعر خاص). نجلبه دائمًا.
+        const gt = await guestPriceTier(client, storeId);
         const { allowed, pricePerProduct } = buyerPricing(session, gt);
 
         // تخفيضات المتجر (يضبطها الأدمين) — تُطبَّق بعد إسقاط الأسعار.
