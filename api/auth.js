@@ -3,6 +3,7 @@ import { getTursoClient, reduceChangelog } from './_lib/turso.js';
 import { signSession } from './_lib/session.js';
 import { resolveTenant } from './_lib/tenant.js';
 import { clientIp, isRateLimited, recordFailure, clearAttempts } from './_lib/ratelimit.js';
+import { findClientByUsername, priceTiersFromClient } from './_lib/clients.js';
 
 function isTruthy(v) {
     return v === true || v === 1 || v === '1' || String(v).toLowerCase() === 'true';
@@ -177,6 +178,49 @@ export default async function handler(req, res) {
         }
 
         // ───────────────────────── Customer login (storefront) ─────────────────
+        // ── المسار السريع: مرآة bws_clients (صفّ واحد مفهرس) ──
+        // لقطة نظيفة يصونها تطبيق الهاتف: حساب الدخول + سعر الموقع الخاص + الدين
+        // المحسوب مسبقاً. تُغني عن مسح كامل سجلّ الزبائن. إن لم تكن المرآة مهيّأة
+        // بعد (متجر لم يرفع الزبائن) نعود للمسار القديم أدناه (سجلّ التغييرات).
+        const mirror = await findClientByUsername(client, targetStore, uname);
+        if (mirror) {
+            if (!safeEqual(mirror.web_password || '', password)) {
+                await recordLoginFailure();
+                res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+                return;
+            }
+            await clearLoginAttempts();
+            if (Number(mirror.web_enabled) === 0) {
+                res.status(403).json({ error: 'تم تعطيل دخول هذا الحساب للموقع. يرجى التواصل مع المتجر.' });
+                return;
+            }
+            const priceTiers = priceTiersFromClient(mirror);
+            const sevenDays = 60 * 60 * 24 * 7;
+            const token = signSession({
+                storeId: targetStore,
+                customerUuid: mirror.uuid,
+                customerId: mirror.uuid, // للتوافق مع الحقول القديمة (غير مستعمل للدين)
+                name: mirror.name || mirror.web_username || '',
+                phone: mirror.phone || '',
+                priceTiers,
+                pricePerProduct: false, // سعر واحد لكل زبون في هذا النموذج
+                iat: Math.floor(Date.now() / 1000),
+                exp: Math.floor(Date.now() / 1000) + sevenDays
+            });
+            res.status(200).json({
+                ok: true,
+                token,
+                customer: {
+                    name: mirror.name || mirror.web_username || '',
+                    phone: mirror.phone || '',
+                    priceTiers,
+                    pricePerProduct: false
+                }
+            });
+            return;
+        }
+
+        // ── المسار الاحتياطي: سجلّ الزبائن الكامل (متاجر لم ترفع مرآة الزبائن) ──
         const result = await client.execute({
             sql: `SELECT record_uuid, operation, json_payload, timestamp
                   FROM turso_customer_changelog

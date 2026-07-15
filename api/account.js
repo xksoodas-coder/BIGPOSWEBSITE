@@ -1,5 +1,6 @@
 import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
+import { getClientByUuid } from './_lib/clients.js';
 
 /**
  * GET /api/account  → { remaining, paid }
@@ -27,6 +28,25 @@ export default async function handler(req, res) {
         if (!session || !session.storeId) {
             res.status(401).json({ error: 'يجب تسجيل الدخول' });
             return;
+        }
+
+        // ── المسار السريع: الدين المحسوب مسبقاً من مرآة bws_clients ──
+        // تطبيق الهاتف يُحدّث عمود الدين لهذا الزبون عند كل فاتورة/تسديد/دين مضاف،
+        // فنقرؤه هنا من صفّ واحد بدل إعادة حسابه من كل السجلّات (وهو ما كان
+        // يُظهر ديوناً خاطئة). غياب المرآة ⇒ نُكمل للحساب القديم أدناه.
+        const client = getTursoClient();
+        const custUuid = session.customerUuid;
+        if (custUuid) {
+            const row = await getClientByUuid(client, session.storeId, custUuid);
+            if (row) {
+                res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+                res.setHeader('Pragma', 'no-cache');
+                res.status(200).json({
+                    remaining: Math.round((Number(row.debt) || 0) * 100) / 100,
+                    available: true
+                });
+                return;
+            }
         }
 
         const customerId = session.customerId;
@@ -62,7 +82,6 @@ export default async function handler(req, res) {
             return Number(data[idField]) === cid;
         }
 
-        const client = getTursoClient();
         const [invoices, payments, debts] = await Promise.all([
             client.execute({
                 sql: `SELECT record_uuid, operation, json_payload, timestamp
