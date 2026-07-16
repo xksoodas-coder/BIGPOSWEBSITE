@@ -3,7 +3,7 @@ import { resolveReadAccess, getStoreSettings } from './_lib/access.js';
 // قراءة عبر الموجّه: Turso (bws_products) إن كان المتجر منسوخًا، وإلا Supabase.
 import { getCatalog, getFamilyPage } from './_lib/turso-catalog.js';
 import { splitFamilies } from './_lib/families.js';
-import { buyerPricing, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
+import { buyerPricingLive, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
 import { getStoreDiscounts, applyDiscount } from './_lib/discounts.js';
 
 /**
@@ -35,13 +35,15 @@ export default async function handler(req, res) {
 
         // كاش الحافة (Edge/CDN) للضيوف: الرد نفسه لكل ضيوف المتجر المباشر، فيُخزَّن
         // على Vercel Edge ويتشاركه الجميع → قراءات Supabase/Turso أقل بكثير.
-        // المسجّلون يبقون private (فيهم مفضلة/أسعار خاصة). Vary يمنع خلط المتاجر.
+        // نافذة قصيرة (5ث) تكفي لامتصاص الدفقات مع بقاء أي refresh لاحق طازجًا؛
+        // بلا stale-while-revalidate كي لا يُقدَّم سعر قديم بعد تغيير سعر الموقع.
+        // المسجّلون: no-store — أسعارهم خاصّة بهم ويجب أن تكون حيّة عند كل refresh.
         const setCacheHeaders = () => {
             if (access.guest) {
-                res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+                res.setHeader('Cache-Control', 'public, s-maxage=5');
                 res.setHeader('Vary', 'x-store-slug');
             } else {
-                res.setHeader('Cache-Control', 'private, max-age=15');
+                res.setHeader('Cache-Control', 'no-store');
             }
         };
 
@@ -77,7 +79,10 @@ export default async function handler(req, res) {
 
         // سعر الموقع = الافتراضي للجميع (زائر ومسجّل بلا سعر خاص). نجلبه دائمًا.
         const gt = await guestPriceTier(client, storeId);
-        const { allowed, pricePerProduct } = buyerPricing(session, gt);
+        // تُحلّ مستويات الزبون من المرآة وقت الطلب (لا من التوكن) → تغيير السعر
+        // الخاص أو صلاحيته على الهاتف يظهر بمجرّد refresh بلا خروج ودخول.
+        const { allowed, pricePerProduct } =
+            await buyerPricingLive(client, storeId, session, gt);
 
         // تخفيضات المتجر (يضبطها الأدمين) — تُطبَّق بعد إسقاط الأسعار.
         const discounts = await getStoreDiscounts(storeId);

@@ -3,7 +3,7 @@ import { readSessionFromRequest } from './_lib/session.js';
 import { resolveTenant } from './_lib/tenant.js';
 import { getCatalog, getFamilies, getFamilyPage } from './_lib/turso-catalog.js';
 import { storeLogoUrl } from './_lib/r2.js';
-import { buyerPricing, projectProductPrices } from './_lib/pricing.js';
+import { buyerPricingLive, projectProductPrices } from './_lib/pricing.js';
 import { getStoreDiscounts, applyDiscount } from './_lib/discounts.js';
 import { splitFamilies } from './_lib/families.js';
 
@@ -116,7 +116,10 @@ export default async function handler(req, res) {
 
         // مستويات الأسعار المسموحة للمشتري — تُسقَط على كل المنتجات المُعادة كي لا
         // تُكشف باقي المستويات (الجملة/الخاصة) للزبون.
-        const { allowed, pricePerProduct } = buyerPricing(loggedIn ? session : null, guestTier || 1);
+        // تُحلّ مستويات الزبون من المرآة وقت الطلب (لا من التوكن) → أي تغيير على
+        // الهاتف (السعر الخاص أو صلاحيته) يظهر بمجرّد refresh بلا خروج ودخول.
+        const { allowed, pricePerProduct } = await buyerPricingLive(
+            client, storeId, loggedIn ? session : null, guestTier || 1);
         // تخفيضات المتجر (يضبطها الأدمين) — تُطبَّق على كل منتج مُعاد.
         let discounts = new Map();
         try { discounts = await getStoreDiscounts(storeId); } catch { /* لا تخفيضات */ }

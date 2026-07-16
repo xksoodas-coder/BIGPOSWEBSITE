@@ -3,6 +3,7 @@ import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
 import { resolveStoreAccess, getStoreSettings } from './_lib/access.js';
 import { getCatalog } from './_lib/turso-catalog.js';
+import { buyerPricingLive, guestPriceTier, priceForTier } from './_lib/pricing.js';
 import { clientIp, isRateLimited, recordFailure } from './_lib/ratelimit.js';
 
 // حدّ إنشاء الطلبات لكل IP (نافذة 10 دقائق) — يمنع إغراق المتجر بطلبات.
@@ -220,42 +221,13 @@ export default async function handler(req, res) {
             }
             const byUuid = new Map(catalog.map(p => [p.uuid, p]));
 
-            // مستويات الأسعار المسموحة لهذا المشتري (مطابقة لمنطق العميل).
-            let allowedTiers;
-            let pricePerProduct = false;
-            if (session) {
-                const t = (Array.isArray(session.priceTiers) ? session.priceTiers : [])
-                    .map(Number).filter(n => n >= 1 && n <= 7);
-                allowedTiers = t.length ? Array.from(new Set(t)).sort((a, b) => a - b) : [1];
-                pricePerProduct = session.pricePerProduct === true && allowedTiers.length > 1;
-            } else {
-                // زائر (وضع 'direct'): سعر واحد من إعدادات الموقع (يضبطه تطبيق الهاتف).
-                let gt = 1;
-                try {
-                    const w = await client.execute({
-                        sql: `SELECT json_payload FROM turso_web_settings WHERE store_id = ? LIMIT 1`,
-                        args: [storeId]
-                    });
-                    if (w.rows.length) {
-                        const wj = JSON.parse(w.rows[0].json_payload || '{}');
-                        const n = Number(wj.guestPriceTier);
-                        if (n >= 1 && n <= 7) gt = n;
-                    }
-                } catch { /* default tier 1 */ }
-                allowedTiers = [gt];
-            }
-
-            const priceForTier = (prod, tier) => {
-                const v = Number(prod['price' + tier] ?? 0);
-                if (v > 0) return v;
-                const p1 = Number(prod.price1 ?? prod.price ?? 0);
-                if (p1 > 0) return p1;
-                for (const k of [2, 3, 4, 5, 6, 7]) {
-                    const x = Number(prod['price' + k] ?? 0);
-                    if (x > 0) return x;
-                }
-                return 0;
-            };
+            // مستويات الأسعار المسموحة لهذا المشتري — **نفس دالة الكتالوج بالضبط**
+            // (buyerPricingLive) كي يكون السعر المفروض هنا مطابقًا تمامًا للسعر
+            // الذي رآه الزبون: يشمل «سعر الموقع» كافتراضي للمسجّل بلا سعر خاص،
+            // ويقرأ السعر الخاص وصلاحيته حيّةً من المرآة لا من التوكن.
+            const gt = await guestPriceTier(client, storeId);
+            const { allowed: allowedTiers, pricePerProduct } =
+                await buyerPricingLive(client, storeId, session || null, gt);
 
             for (const it of cleanItems) {
                 const prod = it.uuid ? byUuid.get(it.uuid) : null;

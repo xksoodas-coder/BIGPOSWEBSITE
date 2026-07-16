@@ -6,6 +6,8 @@
  * storefront keeps working.
  */
 
+import { getClientByUuid, priceTiersFromClient } from './clients.js';
+
 /** { allowed: number[], pricePerProduct: bool } for a buyer (session or guest).
  *
  * سعر الموقع (guestTier) صار الافتراضي للجميع — الزائر **والزبون المسجّل** —
@@ -24,6 +26,29 @@ export function buyerPricing(session, guestTier) {
         return { allowed, pricePerProduct: session.pricePerProduct === true && allowed.length > 1 };
     }
     return { allowed: [g], pricePerProduct: false };
+}
+
+/**
+ * Same as [buyerPricing], but resolves the customer's tier at **request time**
+ * from the bws_clients mirror instead of trusting the session token.
+ *
+ * Why: the token is signed for 7 DAYS and carries the tiers that were true at
+ * LOGIN. Without this, flipping the special-price switch (or changing the tier)
+ * on the phone would not reach the customer until they logged out and back in —
+ * a refresh would keep showing the old price. Reading the mirror row is one
+ * indexed lookup (exactly what the mirror exists for), so a plain refresh is now
+ * enough for every pricing change to land.
+ *
+ * Falls back to the token's tiers when there is no mirror row (a store that
+ * never ran «رفع الزبائن للمتجر»), so legacy stores keep working unchanged.
+ */
+export async function buyerPricingLive(client, storeId, session, guestTier) {
+    let s = session;
+    if (session && session.customerUuid) {
+        const row = await getClientByUuid(client, storeId, session.customerUuid);
+        if (row) s = { ...session, priceTiers: priceTiersFromClient(row) };
+    }
+    return buyerPricing(s, guestTier);
 }
 
 /** Guest price tier from the store's web settings (mobile-set). Default 1. */

@@ -1,7 +1,7 @@
 import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess } from './_lib/access.js';
 import { productImageUrl, productImageUrlLegacy } from './_lib/r2.js';
-import { buyerPricing, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
+import { buyerPricingLive, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
 import { getStoreDiscounts, applyDiscount } from './_lib/discounts.js';
 
 /**
@@ -92,7 +92,9 @@ export default async function handler(req, res) {
 
         // سعر الموقع = الافتراضي للجميع (زائر ومسجّل بلا سعر خاص). نجلبه دائمًا.
         const gt = await guestPriceTier(client, access.storeId);
-        const { allowed, pricePerProduct } = buyerPricing(access.session, gt);
+        // مستويات الزبون تُقرأ حيّة من المرآة (لا من التوكن) → refresh يكفي.
+        const { allowed, pricePerProduct } =
+            await buyerPricingLive(client, access.storeId, access.session, gt);
         const priced = projectProductPrices({
             price1: Number(full.sellPrice ?? 0),
             price2: Number(full.wholesalePrice ?? 0),
@@ -109,7 +111,9 @@ export default async function handler(req, res) {
             applyDiscount(priced, discounts.get(uuid));
         } catch { /* بلا تخفيض */ }
 
-        res.setHeader('Cache-Control', 'private, max-age=30');
+        // أسعار المسجّلين حيّة عند كل refresh؛ الضيوف نافذة حافة قصيرة فقط.
+        res.setHeader('Cache-Control',
+            access.guest ? 'public, s-maxage=5' : 'no-store');
         res.status(200).json({
             uuid,
             name: full.name ?? '',
