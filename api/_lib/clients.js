@@ -62,13 +62,24 @@ export async function clientsMirrorHasRows(client, storeId) {
 }
 
 /**
- * Translate a mirror row into the session's price tiers, honoring the
- * per-customer "special price" switch: OFF → [1] (which downstream pricing maps
- * to the store's general web price / guestPriceTier); ON → the chosen tier.
+ * The customer's EXPLICIT tier from a mirror row, or `null` meaning "no special
+ * price → follow the store's general web price (guestPriceTier)".
+ *
+ * The switch is the authority: OFF → null. ON → [tier], **even when the tier is
+ * 1** — a merchant who turns the switch on and picks price 1 wants price 1, not
+ * the web price.
+ *
+ * This is why we must NOT return [1] for the OFF case: `buyerPricing` treats a
+ * bare [1] as "default retail, no special price" and maps it to the web tier.
+ * That heuristic is right for the LEGACY token path (where CanUsePrice1 defaults
+ * to true, so [1] really does mean "nothing special"), but the mirror knows the
+ * difference for certain — so it answers with null vs [tier] and never lets the
+ * heuristic guess. Returning [1] here is what made "special price = price 1"
+ * silently show the web price instead.
  */
 export function priceTiersFromClient(row) {
     const special = Number(row.special_price_enabled) === 1;
     const tier = Number(row.price_tier);
     if (special && tier >= 1 && tier <= 7) return [tier];
-    return [1];
+    return null;
 }

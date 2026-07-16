@@ -194,7 +194,10 @@ export default async function handler(req, res) {
                 res.status(403).json({ error: 'تم تعطيل دخول هذا الحساب للموقع. يرجى التواصل مع المتجر.' });
                 return;
             }
-            const priceTiers = priceTiersFromClient(mirror);
+            // null = بلا سعر خاص (يتبع سعر الموقع). التوكن يحمل [1] كاحتياطي فقط —
+            // التسعير الفعلي يُحلّ حيًّا من المرآة عند كل طلب (buyerPricingLive)،
+            // فلا يُعتمد على هذه القيمة في العرض.
+            const priceTiers = priceTiersFromClient(mirror) || [1];
             const sevenDays = 60 * 60 * 24 * 7;
             const token = signSession({
                 storeId: targetStore,

@@ -39,16 +39,27 @@ export function buyerPricing(session, guestTier) {
  * indexed lookup (exactly what the mirror exists for), so a plain refresh is now
  * enough for every pricing change to land.
  *
+ * When a mirror row exists it is AUTHORITATIVE and the `isDefault` heuristic in
+ * [buyerPricing] is bypassed entirely: the switch already told us the answer, so
+ * OFF → the web tier, ON → the chosen tier **even if that tier is 1**. Letting
+ * the heuristic run here would collapse "special price = price 1" into the web
+ * price. The heuristic still applies to the legacy fallback below, where a bare
+ * [1] genuinely does mean "no special price".
+ *
  * Falls back to the token's tiers when there is no mirror row (a store that
  * never ran «رفع الزبائن للمتجر»), so legacy stores keep working unchanged.
  */
 export async function buyerPricingLive(client, storeId, session, guestTier) {
-    let s = session;
     if (session && session.customerUuid) {
         const row = await getClientByUuid(client, storeId, session.customerUuid);
-        if (row) s = { ...session, priceTiers: priceTiersFromClient(row) };
+        if (row) {
+            const g = (guestTier >= 1 && guestTier <= 7) ? guestTier : 1;
+            const tiers = priceTiersFromClient(row); // [tier] أو null = سعر الموقع
+            // سعر واحد لكل زبون في نموذج المرآة (كما يضبطه auth.js).
+            return { allowed: tiers || [g], pricePerProduct: false };
+        }
     }
-    return buyerPricing(s, guestTier);
+    return buyerPricing(session, guestTier);
 }
 
 /** Guest price tier from the store's web settings (mobile-set). Default 1. */
