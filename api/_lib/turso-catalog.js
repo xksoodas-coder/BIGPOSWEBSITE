@@ -39,6 +39,9 @@ function shapeProduct(storeId, row) {
         if (Array.isArray(s)) {
             sizes = s
                 .map((x) => ({
+                    // معرّف الصندوق الثابت — تُطابَق به الطلبية عند التجهيز حتى لو
+                    // أُعيدت تسمية الصندوق (المطابقة بالاسم هشّة).
+                    sizeId: Number(x.size_id ?? x.sizeId ?? 0),
                     name: String(x.name ?? ''),
                     capacity: Number(x.capacity ?? 0),
                     // سعر بيع الصندوق (0 = غير محدَّد → يُحسب من سعر الوحدة × السعة).

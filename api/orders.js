@@ -159,10 +159,13 @@ export default async function handler(req, res) {
                 unitQty: Number(it.unitQty) || 0,
                 sizes: Array.isArray(it.sizes)
                     ? it.sizes.map(s => ({
+                        // معرّف الصندوق الثابت (إن أرسله العميل) — يُثبَّت/يُصحَّح من
+                        // الكتالوج أدناه ثم يُخزَّن مع الطلبية ليطابَق به عند التجهيز.
+                        size_id: Number(s.size_id ?? s.sizeId) || 0,
                         name: String(s.name || ''),
                         capacity: Number(s.capacity) || 0,
                         qty: Number(s.qty) || 0,
-                        // سعر بيع الصندوق (يُتحقّق منه من الكتالوج أدناه، لا يُوثق كما هو).
+                        // سعر بيع الصندوق (يُتحقّق منه من الكتالوج أدناه, لا يُوثق كما هو).
                         price: Number(s.price) || 0
                     })).filter(s => s.name && s.qty > 0)
                     : []
@@ -248,8 +251,14 @@ export default async function handler(req, res) {
                 const box = (Array.isArray(it.sizes) && it.sizes.length &&
                     Number(it.sizes[0].capacity) > 0) ? it.sizes[0] : null;
                 if (box) {
+                    // نطابق صندوق الكتالوج بالمعرّف الثابت (إن وُجد) وإلا بالاسم،
+                    // ثم نثبّت هذا المعرّف في تفصيل الطلبية ليطابَق به عند التجهيز
+                    // على الهاتف حتى لو أُعيدت تسمية الصندوق لاحقاً.
                     const prodSize = Array.isArray(prod.sizes)
-                        ? prod.sizes.find(s => s.name === box.name) : null;
+                        ? (prod.sizes.find(s => Number(box.size_id) > 0 && Number(s.sizeId) === Number(box.size_id))
+                            || prod.sizes.find(s => s.name === box.name))
+                        : null;
+                    if (prodSize && Number(prodSize.sizeId) > 0) box.size_id = Number(prodSize.sizeId);
                     const trustedBox = (prodSize && Number(prodSize.boxPrice) > 0)
                         ? Number(prodSize.boxPrice)
                         : allowedPrices[0] * Number(box.capacity);
