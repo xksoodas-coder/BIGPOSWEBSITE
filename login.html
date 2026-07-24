@@ -53,9 +53,15 @@
             root.style.setProperty('--primary-dark', settings.theme.primaryDark);
             root.style.setProperty('--primary-light', settings.theme.primaryLight);
 
-            // Which store is this link/domain?
+            // Which store is this link/domain? The host itself carries the slug
+            // on a store subdomain (asd.<root>), so hide the store-code field
+            // immediately — before/independently of the server round-trip.
+            const onStoreHost = !!BWS.tenantHostSlug();
+            const storeIdGroup = document.getElementById('storeIdGroup');
+            if (onStoreHost) storeIdGroup.style.display = 'none';
+
             const tenant = await BWS.resolveTenant();
-            const tenantActive = tenant && tenant.found && tenant.active;
+            const tenantActive = tenant && tenant.found && tenant.active !== false;
 
             if (tenant && tenant.found && tenant.active === false) {
                 document.querySelector('.login-card').innerHTML =
@@ -63,14 +69,29 @@
                 return;
             }
 
-            if (tenantActive) {
-                // Store is known from the link → no need to type a store code.
-                document.getElementById('storeIdGroup').style.display = 'none';
+            // The server positively answered "this host belongs to no store"
+            // (not a transient failure) → the subdomain isn't registered in
+            // bws_tenants. Say so, and re-open the code field as an escape hatch
+            // instead of leaving the customer with no way in.
+            const unregisteredHost = onStoreHost && tenant && !tenant.found && !tenant.offline;
+
+            // Ask for a store code ONLY on the platform host with no store in the
+            // link. On a store subdomain the server resolves the store from the
+            // Host header at login time, so a failed/slow tenant lookup here must
+            // never degrade the page into asking the customer for a code.
+            if ((tenantActive || onStoreHost) && !unregisteredHost) {
+                storeIdGroup.style.display = 'none';
                 document.getElementById('cStoreId').required = false;
                 const nameEl = document.getElementById('tenantName');
-                if (tenant.name) { nameEl.textContent = tenant.name; nameEl.hidden = false; }
+                if (tenant && tenant.name) { nameEl.textContent = tenant.name; nameEl.hidden = false; }
             } else {
+                storeIdGroup.style.display = '';
                 document.getElementById('cStoreId').required = true;
+                if (unregisteredHost) {
+                    const errEl0 = document.getElementById('customerLoginError');
+                    errEl0.textContent = 'هذا العنوان غير مربوط بأي متجر. يرجى إدخال رمز المتجر أو التواصل مع المزوّد.';
+                    errEl0.hidden = false;
+                }
             }
 
             const session = BWS.getCustomerSession();
@@ -97,7 +118,10 @@
 
                 const username = document.getElementById('cUsername').value;
                 const password = document.getElementById('cPassword').value;
-                const storeId = tenantActive ? '' : document.getElementById('cStoreId').value;
+                // On a store host the server derives the store from the Host
+                // header — never send a (hidden, empty) code.
+                const storeId = (tenantActive || (onStoreHost && !unregisteredHost))
+                    ? '' : document.getElementById('cStoreId').value;
 
                 const result = await BWS.customerLogin(username, password, storeId);
                 if (result.ok) {

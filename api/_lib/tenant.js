@@ -21,9 +21,20 @@ import { getTursoClient } from './turso.js';
 
 let _cache = { at: 0, byDomain: new Map(), bySlug: new Map() };
 const TTL_MS = 60 * 1000;
+// After a failed refresh we keep serving the previous registry and retry soon,
+// instead of 500-ing (which made the storefront forget its own store).
+const RETRY_MS = 5 * 1000;
 
-function rootDomain() {
-    return (process.env.BWS_ROOT_DOMAIN || '').toLowerCase().replace(/^\.+/, '').replace(/:.*/, '');
+// Host labels that are the platform itself, never a store slug.
+const PLATFORM_LABELS = new Set(['www', 'api', 'admin', 'app', 'store']);
+
+/** Configured platform roots. Accepts a comma-separated list. */
+function rootDomains() {
+    return (process.env.BWS_ROOT_DOMAIN || '')
+        .toLowerCase()
+        .split(',')
+        .map(s => s.trim().replace(/^\.+/, '').replace(/:.*/, ''))
+        .filter(Boolean);
 }
 
 export async function ensureTenantsTable(client) {
@@ -47,25 +58,38 @@ export async function ensureTenantsTable(client) {
 export function invalidateTenantCache() { _cache.at = 0; }
 
 async function loadAll(client) {
-    if (Date.now() - _cache.at < TTL_MS && (_cache.bySlug.size || _cache.byDomain.size)) return;
-    await ensureTenantsTable(client);
-    const r = await client.execute(
-        `SELECT store_id, slug, custom_domain, display_name, is_active FROM bws_tenants`
-    );
-    const byDomain = new Map();
-    const bySlug = new Map();
-    for (const row of r.rows) {
-        const t = {
-            storeId: row.store_id,
-            slug: (row.slug || '').toLowerCase(),
-            customDomain: (row.custom_domain || '').toLowerCase().replace(/^www\./, ''),
-            name: row.display_name || '',
-            active: Number(row.is_active) !== 0
-        };
-        if (t.slug) bySlug.set(t.slug, t);
-        if (t.customDomain) byDomain.set(t.customDomain, t);
+    const hasCache = _cache.bySlug.size || _cache.byDomain.size;
+    if (Date.now() - _cache.at < TTL_MS && hasCache) return;
+    try {
+        await ensureTenantsTable(client);
+        const r = await client.execute(
+            `SELECT store_id, slug, custom_domain, display_name, is_active FROM bws_tenants`
+        );
+        const byDomain = new Map();
+        const bySlug = new Map();
+        for (const row of r.rows) {
+            const t = {
+                storeId: row.store_id,
+                slug: (row.slug || '').toLowerCase(),
+                customDomain: (row.custom_domain || '').toLowerCase().replace(/^www\./, ''),
+                name: row.display_name || '',
+                active: Number(row.is_active) !== 0
+            };
+            if (t.slug) bySlug.set(t.slug, t);
+            if (t.customDomain) byDomain.set(t.customDomain, t);
+        }
+        _cache = { at: Date.now(), byDomain, bySlug };
+    } catch (err) {
+        // A transient DB hiccup must NOT make a known store look unknown (the
+        // storefront then shows the "رمز المتجر" field on a store's own
+        // subdomain). Serve the previous registry and retry shortly.
+        if (hasCache) {
+            _cache.at = Date.now() - TTL_MS + RETRY_MS;
+            console.error('[tenant] refresh failed, serving cached registry:', err?.message || err);
+            return;
+        }
+        throw err;
     }
-    _cache = { at: Date.now(), byDomain, bySlug };
 }
 
 function hostOf(req) {
@@ -91,17 +115,21 @@ export async function resolveTenant(req) {
 
     const host = hostOf(req);
     const hostNoWww = host.replace(/^www\./, '');
-    const root = rootDomain();
+    const roots = rootDomains();
 
     // 1) Custom domain (exact, with/without www).
     if (_cache.byDomain.has(host)) return _cache.byDomain.get(host);
     if (_cache.byDomain.has(hostNoWww)) return _cache.byDomain.get(hostNoWww);
 
-    // 2) Subdomain of the platform root: {slug}.<root>
-    if (root && host.endsWith('.' + root)) {
+    // 2) Subdomain of a configured platform root: {slug}.<root>
+    const root = roots.find(r => host.endsWith('.' + r));
+    if (root) {
         const sub = host.slice(0, -(root.length + 1));
         const slug = sub.split('.').pop(); // last label, supports nested
-        if (slug && slug !== 'www') {
+        if (slug && !PLATFORM_LABELS.has(slug)) {
+            // Authoritative: a store subdomain never falls through to the
+            // client-supplied slug (a customer on store A's domain must not be
+            // able to spoof store B).
             return _cache.bySlug.get(slug) || null;
         }
         // `www.<root>` is the platform host (not a store subdomain) — fall
@@ -109,6 +137,18 @@ export async function resolveTenant(req) {
         // and preview hosts. Otherwise guests on www couldn't resolve a store
         // (so 'direct' mode would wrongly 401), while colors/settings — read
         // post-login from the session — kept working, causing a confusing split.
+    } else if (!host.endsWith('.vercel.app')) {
+        // 2b) Env-independent fallback: any host of the form {label}.<domain>
+        //     whose first label is a registered slug IS that store. Without
+        //     this, forgetting to set BWS_ROOT_DOMAIN silently disabled
+        //     subdomain resolution, and first-time visitors on asd.<root> were
+        //     asked for a store code (returning visitors were saved by the
+        //     slug cached in their browser — hence the "random" failures).
+        const labels = host.split('.');
+        if (labels.length >= 3 && !PLATFORM_LABELS.has(labels[0])) {
+            const t = _cache.bySlug.get(labels[0]);
+            if (t) return t;
+        }
     }
 
     // 3) Platform/preview host (e.g. *.vercel.app or apex) → explicit slug.

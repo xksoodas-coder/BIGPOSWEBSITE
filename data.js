@@ -36,11 +36,51 @@ const BWS = (function () {
         try { return (new URLSearchParams(location.search).get('store') || '').trim().toLowerCase(); }
         catch { return ''; }
     }
+
+    // Host labels that are the platform itself, never a store slug.
+    const PLATFORM_LABELS = ['www', 'api', 'admin', 'app', 'store'];
+
+    // Derive the store slug from the URL host itself: `asd.bigsoft.top` → `asd`.
+    // The page therefore knows which store it is with ZERO network calls, so a
+    // slow/failed /api/tenant (or a missing BWS_ROOT_DOMAIN on the server) can
+    // no longer make a store's own subdomain look like an unknown store and ask
+    // the customer for a store code.
+    function hostSlug() {
+        let host = '';
+        try { host = (location.hostname || '').toLowerCase(); } catch { return ''; }
+        if (!host || host === 'localhost') return '';
+        if (/^\d+(\.\d+){3}$/.test(host)) return '';   // raw IP
+        if (host.endsWith('.vercel.app')) return '';   // preview host
+        const labels = host.split('.');
+        if (labels.length < 3) return '';              // apex or custom domain
+        const first = labels[0];
+        if (!first || PLATFORM_LABELS.includes(first)) return '';
+        return first;
+    }
+
+    // The resolved tenant is cached PER HOST: one device may visit several
+    // stores (or the platform host with ?store=), and a single shared entry
+    // would leak store A's identity into store B's page.
+    function tenantCacheKey() {
+        let h = '';
+        try { h = (location.hostname || '').toLowerCase(); } catch { h = ''; }
+        return LS_TENANT + '_' + (h || '_');
+    }
+    function cachedTenant() {
+        const t = readJSON(tenantCacheKey(), null);
+        if (t) return t;
+        // Legacy (pre per-host) entry — only trusted on a host that carries no
+        // slug of its own, i.e. exactly where it used to be written.
+        return hostSlug() ? null : readJSON(LS_TENANT, null);
+    }
+
     function getTenantSlug() {
         const u = urlStoreSlug();
         if (u) return u;
-        try { const t = JSON.parse(localStorage.getItem(LS_TENANT) || 'null'); return (t && t.slug) || ''; }
-        catch { return ''; }
+        const h = hostSlug();
+        if (h) return h;
+        const t = cachedTenant();
+        return (t && t.slug) || '';
     }
 
     const DEFAULT_SETTINGS = {
@@ -352,12 +392,16 @@ const BWS = (function () {
             }
 
             if (data.tenant) {
-                _tenantInfo = data.tenant;
                 if (data.tenant.found && data.tenant.slug) {
-                    writeJSON(LS_TENANT, {
+                    _tenantInfo = data.tenant;
+                    writeJSON(tenantCacheKey(), {
                         slug: data.tenant.slug, storeId: data.tenant.storeId,
                         name: data.tenant.name, active: data.tenant.active
                     });
+                } else if (!_tenantInfo || !_tenantInfo.found) {
+                    // Don't let a "not found" from bootstrap overwrite a tenant
+                    // we already resolved (or cached) for this host.
+                    _tenantInfo = data.tenant;
                 }
             }
             if (data.settings && typeof data.settings === 'object') {
@@ -715,25 +759,39 @@ const BWS = (function () {
         // ----- tenant (multi-store) -----
         // Resolve which store this link/domain belongs to (before login).
         async resolveTenant({ force = false } = {}) {
-            if (!force && _tenantInfo) return _tenantInfo;
-            const slug = urlStoreSlug();
+            if (!force && _tenantInfo && _tenantInfo.found) return _tenantInfo;
+            const slug = getTenantSlug();
             const qs = slug ? ('?store=' + encodeURIComponent(slug)) : '';
-            try {
-                const data = await apiFetch('/api/tenant' + qs, { method: 'GET' });
-                _tenantInfo = data;
-                if (data && data.found && data.slug) {
-                    writeJSON(LS_TENANT, {
-                        slug: data.slug, storeId: data.storeId,
-                        name: data.name, active: data.active
-                    });
+            // One retry: a single cold-start/transient failure used to degrade
+            // the page to "unknown store" for the whole visit.
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    const data = await apiFetch('/api/tenant' + qs, { method: 'GET' });
+                    if (data && data.found && data.slug) {
+                        writeJSON(tenantCacheKey(), {
+                            slug: data.slug, storeId: data.storeId,
+                            name: data.name, active: data.active
+                        });
+                    }
+                    _tenantInfo = data;
+                    return data;
+                } catch {
+                    if (attempt === 0) continue;
                 }
-                return data;
-            } catch {
-                return { found: false };
             }
+            // Server unreachable → reuse the last known tenant for THIS host
+            // rather than pretending the store is unknown. `offline` tells the
+            // caller this is a fallback, not a server "not found".
+            const cached = cachedTenant();
+            if (cached && cached.slug) return { ...cached, found: true, offline: true };
+            return { found: false, offline: true, hostSlug: hostSlug() };
         },
+        // The slug carried by the URL host itself (empty on the platform host
+        // or a custom domain). Non-empty ⇒ this page belongs to one store, even
+        // if the server could not be reached to confirm it.
+        tenantHostSlug: () => hostSlug(),
         getTenantInfo() {
-            return _tenantInfo || readJSON(LS_TENANT, null);
+            return _tenantInfo || cachedTenant();
         },
 
         // ----- customer session (server) -----

@@ -97,7 +97,9 @@ async function wireLogin() {
     let tenantActive = false;
     try {
         const tenant = await BWS.resolveTenant();
-        tenantActive = tenant && tenant.found && tenant.active;
+        // A store subdomain identifies the store by itself (Host header), so
+        // hide the code field even when the tenant lookup could not confirm it.
+        tenantActive = !!BWS.tenantHostSlug() || !!(tenant && tenant.found && tenant.active);
         if (tenantActive) {
             const grp = document.getElementById('adminStoreIdGroup');
             if (grp) grp.style.display = 'none';
