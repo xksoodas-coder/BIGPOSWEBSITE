@@ -150,6 +150,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     try { await BWS.fetchSiteSettings(); } catch {}
     applyTheme();
+    // بيكسل المتجر (إن ضبطه صاحب المتجر) — بعد وصول الإعدادات من الخادم.
+    window.BWSPixel?.refresh();
     // The order form is available in both modes. On a login-required store the
     // customer must be signed in first (the order then carries their session).
     const directMode = BWS.getSettings().orderMode === 'direct';
@@ -257,6 +259,7 @@ function renderInitial() {
     renderOrderPage();
     renderRelatedProducts(selUuid);
     enrichSelected(_selectedProduct);
+    window.BWSPixel?.viewContent(_selectedProduct);
     _initialRendered = true;
 }
 
@@ -286,6 +289,8 @@ async function selectProduct(uuid, { push = true } = {}) {
     restoreForm(form);
     renderRelatedProducts(uuid);
     enrichSelected(p);
+    // التنقّل بين المنتجات هنا بلا إعادة تحميل — كل منتج يُعدّ «مشاهدة محتوى».
+    window.BWSPixel?.viewContent(p);
     if (section) requestAnimationFrame(() => section.classList.remove('swapping'));
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -667,6 +672,22 @@ function bindSubmit() {
     const btn = document.getElementById('orderSubmit');
     if (!btn) return;
 
+    // بدء الطلب: أول لمسة على الاسم/الهاتف تعني أن الزائر شرع في الشراء.
+    // مفوَّض على المستند لأن القسم العلوي يُعاد بناؤه عند تبديل المنتج.
+    if (!bindSubmit._icBound) {
+        bindSubmit._icBound = true;
+        document.addEventListener('input', (e) => {
+            const id = e.target && e.target.id;
+            if (id !== 'ofName' && id !== 'ofPhone') return;
+            const p = _selectedProduct;
+            if (!p) return;
+            window.BWSPixel?.initiateCheckoutOnce(
+                [{ uuid: p.uuid, name: p.name, price: BWS.effectivePrice(p), qty: _currentQty }],
+                BWS.effectivePrice(p) * _currentQty
+            );
+        }, { passive: true });
+    }
+
     btn.addEventListener('click', async () => {
         const p = _selectedProduct;
         if (!p) return;
@@ -697,6 +718,9 @@ function bindSubmit() {
         const delivery = currentDeliveryFee();
         const res = await BWS.submitGuestOrder({ items, name, phone, wilaya, baladiya, deliveryType, notes, delivery });
         if (res.ok) {
+            // قيمة الشراء = ثمن المنتج فقط (بلا التوصيل).
+            window.BWSPixel?.purchase(items, BWS.effectivePrice(p) * _currentQty,
+                { orderId: res.uuid, name, phone });
             document.getElementById('orderPage').innerHTML = `
                 <div class="order-success">
                     <div class="order-success-icon">✅</div>

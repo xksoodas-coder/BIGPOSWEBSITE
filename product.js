@@ -83,6 +83,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     try { await BWS.fetchSiteSettings(); } catch {}
     applyTheme();
+    // بيكسل المتجر (إن ضبطه صاحب المتجر) — بعد وصول الإعدادات من الخادم.
+    window.BWSPixel?.refresh();
 
     const direct = BWS.getSettings().orderMode === 'direct';
     window.__BWS_DIRECT__ = direct;
@@ -113,6 +115,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!p) { page.innerHTML = '<div class="empty-state"><h2>المنتج غير متاح</h2></div>'; return; }
 
     renderProduct(p, direct);
+    window.BWSPixel?.viewContent(p);
 });
 
 function renderProduct(p, direct) {
@@ -148,6 +151,7 @@ function renderProduct(p, direct) {
     if (addBtn) {
         addBtn.addEventListener('click', () => {
             if (BWS.addToCart(p, 1)) {
+                window.BWSPixel?.addToCart(p, 1);
                 const badge = document.getElementById('cartBadge');
                 if (badge) { const c = BWS.cartCount(); badge.textContent = c; badge.style.display = c > 0 ? 'flex' : 'none'; }
                 showToast('تمت إضافة المنتج إلى السلة');

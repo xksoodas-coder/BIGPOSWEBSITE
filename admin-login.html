@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>BigWebStore - دخول الإدارة</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="admin.css">
@@ -13,27 +14,69 @@
             <div class="login-logo">
                 <div class="logo-circle"><span>BS</span></div>
             </div>
+            <p class="login-subtitle tenant-name" id="adminTenantName" hidden></p>
             <h1>دخول الإدارة</h1>
-            <p class="login-subtitle">BigWebStore Admin Panel</p>
+            <p class="login-subtitle">لوحة تحكّم المتجر</p>
 
-            <p class="login-subtitle" id="adminTenantName" hidden></p>
             <form id="loginForm" class="admin-form">
                 <div class="form-group" id="adminStoreIdGroup">
                     <label for="storeId">رمز المتجر</label>
-                    <input type="text" id="storeId" autocomplete="off">
+                    <span class="field">
+                        <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 9.5 4.6 5A2 2 0 0 1 6.5 4h11a2 2 0 0 1 1.9 1L21 9.5"/>
+                            <path d="M3 9.5h18v10a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5Z"/>
+                            <path d="M9 21v-5.5h6V21"/>
+                        </svg>
+                        <input type="text" id="storeId" autocomplete="off" placeholder="رمز المتجر">
+                    </span>
                 </div>
+
                 <div class="form-group">
                     <label for="username">اسم المستخدم</label>
-                    <input type="text" id="username" autocomplete="username" required>
+                    <span class="field">
+                        <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                        <input type="text" id="username" autocomplete="username"
+                               placeholder="اسم المستخدم" required>
+                    </span>
                 </div>
+
                 <div class="form-group">
                     <label for="password">كلمة المرور</label>
-                    <input type="password" id="password" autocomplete="current-password" required>
+                    <span class="field has-toggle">
+                        <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="4" y="10.5" width="16" height="10" rx="2.5"/>
+                            <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>
+                        </svg>
+                        <input type="password" id="password" autocomplete="current-password"
+                               placeholder="••••••••" required>
+                        <button type="button" class="field-toggle" id="toggleAdminPassword"
+                                aria-label="إظهار كلمة المرور" aria-pressed="false" title="إظهار كلمة المرور">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/>
+                                <circle cx="12" cy="12" r="2.8"/>
+                            </svg>
+                        </button>
+                    </span>
                 </div>
-                <div class="login-error" id="loginError" hidden>
-                    بيانات الدخول غير صحيحة
+
+                <div class="login-error" id="loginError" role="alert" aria-live="polite" hidden>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9"/><path d="M12 7.5v5"/><path d="M12 16.2h.01"/>
+                    </svg>
+                    <span id="loginErrorText">بيانات الدخول غير صحيحة</span>
                 </div>
-                <button type="submit" class="primary-btn login-btn">دخول</button>
+
+                <button type="submit" class="primary-btn login-btn">
+                    <span id="adminBtnLabel">دخول</span>
+                </button>
             </form>
 
             <p class="login-hint">

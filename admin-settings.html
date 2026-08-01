@@ -412,6 +412,43 @@
                 </label>
             </div>
 
+            <!-- Meta (Facebook) Pixel -->
+            <div class="admin-card">
+                <h2>بيكسل ميتا (فيسبوك وإنستغرام)</h2>
+                <p class="muted" style="margin-bottom:14px;font-size:13px">
+                    البيكسل يربط متجرك بحساب إعلاناتك: يُبلّغ ميتا بما يفعله الزوّار
+                    (فتح صفحة، مشاهدة منتج، إضافة إلى السلة، بدء الطلب، إتمام الطلب)
+                    فتعرف أيّ إعلان جلب مبيعات فعلية، ويتعلّم فيسبوك عرض إعلانك على
+                    من يشبهون المشترين، ويمكنك إعادة استهداف من لم يُكمل طلبه.
+                </p>
+                <div class="form-group">
+                    <label for="metaPixelId">معرّف البيكسل (Pixel ID)</label>
+                    <input type="text" id="metaPixelId" class="admin-input" inputmode="numeric"
+                           autocomplete="off" dir="ltr" placeholder="مثال: 1234567890123456">
+                    <p class="muted" style="margin-top:6px;font-size:12px">
+                        أرقام فقط. تجده في
+                        <b>Meta Events Manager ← مصادر البيانات ← البيكسل</b>.
+                        اتركه فارغًا لتعطيل التتبّع كليًا (عندها لا يُحمَّل أي كود من ميتا).
+                    </p>
+                </div>
+                <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-top:10px">
+                    <input type="checkbox" id="metaAdvancedMatching" style="margin-top:3px">
+                    <span>
+                        المطابقة المتقدّمة
+                        <span class="muted" style="display:block;font-size:12px">
+                            يُرسَل اسم الزبون ورقم هاتفه <b>مشفَّرَين</b> مع حدث «إتمام الطلب»
+                            فقط، لرفع دقة نسب المبيعات إلى الإعلان. فعّلها إن كان ذلك
+                            متوافقًا مع سياسة الخصوصية التي تلتزم بها.
+                        </span>
+                    </span>
+                </label>
+                <p class="muted" style="margin-top:12px;font-size:12px">
+                    ملاحظة مهمة: مع الدفع عند الاستلام يُسجَّل حدث «الشراء» لحظة إرسال
+                    الطلب لا عند التسليم، فأرقام ميتا ستكون أعلى من المبيعات المؤكَّدة
+                    بمقدار الطلبات الملغاة.
+                </p>
+            </div>
+
             <div class="form-actions">
                 <button type="submit" class="primary-btn">حفظ الإعدادات</button>
                 <button type="button" class="ghost-btn" id="resetSettingsBtn">إعادة إلى الافتراضي</button>

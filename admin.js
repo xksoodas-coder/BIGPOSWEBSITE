@@ -108,6 +108,21 @@ async function wireLogin() {
         }
     } catch { /* platform host → keep store-code field */ }
 
+    // Show / hide the password.
+    const passInput = document.getElementById('password');
+    const toggle = document.getElementById('toggleAdminPassword');
+    if (passInput && toggle) {
+        toggle.addEventListener('click', () => {
+            const show = passInput.type === 'password';
+            passInput.type = show ? 'text' : 'password';
+            toggle.setAttribute('aria-pressed', String(show));
+            const label = show ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور';
+            toggle.setAttribute('aria-label', label);
+            toggle.setAttribute('title', label);
+            passInput.focus({ preventScroll: true });
+        });
+    }
+
     const form = document.getElementById('loginForm');
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -115,21 +130,27 @@ async function wireLogin() {
         const password = document.getElementById('password').value;
         const storeId = tenantActive ? '' : document.getElementById('storeId').value.trim();
         const err = document.getElementById('loginError');
+        // Write into the text span so the alert icon survives.
+        const errText = document.getElementById('loginErrorText') || err;
         err.hidden = true;
 
         const btn = form.querySelector('button[type="submit"]');
-        const orig = btn.textContent;
+        const label = document.getElementById('adminBtnLabel') || btn;
+        const orig = label.textContent;
         btn.disabled = true;
-        btn.textContent = 'جاري الدخول...';
+        label.textContent = 'جاري الدخول...';
+        btn.insertAdjacentHTML('afterbegin', '<span class="btn-spinner"></span>');
 
         const res = await BWS.adminLogin(username, password, storeId);
         if (res.ok) {
             window.location.href = 'admin-dashboard.html';
         } else {
             err.hidden = false;
-            err.textContent = res.error || 'بيانات الدخول غير صحيحة';
+            errText.textContent = res.error || 'بيانات الدخول غير صحيحة';
             btn.disabled = false;
-            btn.textContent = orig;
+            const sp = btn.querySelector('.btn-spinner');
+            if (sp) sp.remove();
+            label.textContent = orig;
         }
     });
 }
@@ -391,6 +412,8 @@ function wireSettingsPage() {
         sizeOrderGuest: document.getElementById('sizeOrderGuest'),
         sizeOrderRegistered: document.getElementById('sizeOrderRegistered'),
         showOutOfStock: document.getElementById('showOutOfStock'),
+        metaPixelId: document.getElementById('metaPixelId'),
+        metaAdvancedMatching: document.getElementById('metaAdvancedMatching'),
         btnGuestOrder: document.getElementById('btnGuestOrder'),
         btnGuestCart: document.getElementById('btnGuestCart'),
         btnGuestFav: document.getElementById('btnGuestFav'),
@@ -480,6 +503,10 @@ function wireSettingsPage() {
         if (fields.sizeOrderGuest) fields.sizeOrderGuest.checked = s.sizeOrderGuest === true;
         if (fields.sizeOrderRegistered) fields.sizeOrderRegistered.checked = s.sizeOrderRegistered === true;
         if (fields.showOutOfStock) fields.showOutOfStock.checked = s.showOutOfStock !== false;
+        if (fields.metaPixelId) fields.metaPixelId.value = s.metaPixelId || '';
+        if (fields.metaAdvancedMatching) {
+            fields.metaAdvancedMatching.checked = s.metaAdvancedMatching === true;
+        }
         const pb = (s.productButtons && typeof s.productButtons === 'object') ? s.productButtons : {};
         const g = pb.guest || {}, rg = pb.registered || {};
         if (fields.btnGuestOrder) fields.btnGuestOrder.checked = g.order !== false;
@@ -565,9 +592,13 @@ function wireSettingsPage() {
         });
     }
 
+    // إعدادات المتجر الخام كما وصلت من الخادم (بلا تطبيع) وقت فتح الصفحة.
+    let _serverRaw = {};
+
     async function load() {
         // Server is the source of truth for this store's settings.
         const s = await BWS.fetchSiteSettings({ adminAuth: true });
+        _serverRaw = (BWS.getRawSettings ? BWS.getRawSettings() : {}) || {};
         fillForm(s);
     }
 
@@ -580,13 +611,31 @@ function wireSettingsPage() {
     syncColorToHex(fields.favColor, fields.favColorHex);
     setupDeliveryUI();
 
+    // معرّف بيكسل ميتا كما كتبه الأدمين، بلا فراغات ولا رموز — أرقام فقط.
+    // '' = معطَّل، null = مُدخَل غير صالح (يُبلَّغ به قبل الحفظ).
+    function readPixelId() {
+        const raw = String(fields.metaPixelId?.value || '').replace(/\s+/g, '');
+        if (!raw) return '';
+        return /^\d{5,20}$/.test(raw) ? raw : null;
+    }
+
     // يجمع كل إعدادات الموقع من النموذج (تُستعمل في الحفظ اليدوي وفي حفظ أسعار
     // التوصيل الفوري).
     function collectSettings() {
         let pageSize = parseInt(fields.pageSize?.value, 10);
         if (!Number.isFinite(pageSize) || pageSize < 1) pageSize = 25;
         pageSize = Math.min(200, pageSize);
+        // نبدأ من إعدادات المتجر كما قُرئت من الخادم عند فتح الصفحة، فنحافظ على
+        // المفاتيح التي لا يعرفها هذا النموذج (مثل «banner» الذي يكتبه تطبيق
+        // الإدارة) بدل محوها. guestPriceTier مستثنى: مصدره turso_web_settings
+        // (تطبيق الهاتف) ويُدمج عند القراءة، فكتابته هنا تُجمّد قيمة قديمة.
+        const preserved = { ..._serverRaw };
+        delete preserved.guestPriceTier;
+        // مُدخَل بيكسل غير صالح (يحدث فقط في الحفظ الفوري لأسعار التوصيل، فالحفظ
+        // اليدوي يرفضه): أبقِ المعرّف المحفوظ بدل شطبه.
+        const px = readPixelId();
         return {
+            ...preserved,
             theme: {
                 primary: fields.primary.value,
                 primaryDark: fields.primaryDark.value,
@@ -607,6 +656,8 @@ function wireSettingsPage() {
             sizeOrderGuest: !!fields.sizeOrderGuest?.checked,
             sizeOrderRegistered: !!fields.sizeOrderRegistered?.checked,
             showOutOfStock: fields.showOutOfStock ? !!fields.showOutOfStock.checked : true,
+            metaPixelId: px === null ? String(preserved.metaPixelId || '') : px,
+            metaAdvancedMatching: !!fields.metaAdvancedMatching?.checked,
             productButtons: {
                 guest: {
                     order: !!fields.btnGuestOrder?.checked,
@@ -634,6 +685,13 @@ function wireSettingsPage() {
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        // معرّف بيكسل خاطئ يُبلَّغ عنه بدل أن يُحذف بصمت (وإلا ظنّ التاجر أن
+        // التتبّع يعمل بينما هو معطَّل).
+        if (readPixelId() === null) {
+            showToastAdmin('معرّف البيكسل غير صالح — أرقام فقط (15 أو 16 رقمًا)');
+            fields.metaPixelId?.focus();
+            return;
+        }
         const settings = collectSettings();
 
         const btn = form.querySelector('button[type="submit"]');

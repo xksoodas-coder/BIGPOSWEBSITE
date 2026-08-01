@@ -123,8 +123,21 @@ const BWS = (function () {
         productButtons: {
             guest:      { order: true, cart: true, fav: false },
             registered: { order: true, cart: true, fav: true }
-        }
+        },
+        // بيكسل ميتا (فيسبوك/إنستغرام) الخاص بهذا المتجر — رقم فقط، فارغ = معطَّل.
+        metaPixelId: '',
+        // المطابقة المتقدمة: إرسال هاتف/اسم الزبون (مشفَّرَين من طرف ميتا في
+        // المتصفح) مع حدث الشراء لتحسين نسبة المطابقة. اختياري، معطَّل افتراضياً.
+        metaAdvancedMatching: false
     };
+
+    // معرّف البيكسل أرقام فقط (15–16 رقماً لدى ميتا). التعقيم هنا يضمن أن ما
+    // يصل إلى fbq() لا يمكن أن يكون سوى أرقام مهما كان محتوى الإعدادات.
+    const META_PIXEL_RE = /^\d{5,20}$/;
+    function cleanPixelId(raw) {
+        const v = String(raw == null ? '' : raw).trim();
+        return META_PIXEL_RE.test(v) ? v : '';
+    }
 
     // In-memory cache, refilled per page load.
     let _familiesCache = null;
@@ -231,7 +244,9 @@ const BWS = (function () {
             sizeOrderGuest: raw.sizeOrderGuest === true,
             sizeOrderRegistered: raw.sizeOrderRegistered === true,
             showOutOfStock: raw.showOutOfStock !== false,
-            productButtons: parseProductButtons(raw.productButtons)
+            productButtons: parseProductButtons(raw.productButtons),
+            metaPixelId: cleanPixelId(raw.metaPixelId),
+            metaAdvancedMatching: raw.metaAdvancedMatching === true
         };
     }
     function setSettings(next) {
@@ -318,6 +333,10 @@ const BWS = (function () {
         // ----- settings -----
         getSettings,
         setSettings,
+        // الإعدادات كما وصلت من الخادم بلا تطبيع — تُستعمل عند الحفظ من لوحة
+        // الإدارة كي لا تُمحى المفاتيح التي تكتبها تطبيقات أخرى (مثل «banner»
+        // من SOFT ADMIN MANAGER) لمجرّد أن نموذج الموقع لا يعرفها.
+        getRawSettings: () => readJSON(LS_SETTINGS, {}) || {},
         getDefaultSettings: () => JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
         resetSettings: () => localStorage.removeItem(LS_SETTINGS),
 

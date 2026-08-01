@@ -22,6 +22,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Direct (public) stores skip the login gate; cart stores require login.
     if (!direct && !enforcePrivateAccess()) return;
 
+    // بيكسل المتجر (إن ضبطه صاحب المتجر). بعد بوابة الدخول عمداً: الزائر الذي
+    // سيُحوَّل إلى صفحة الدخول لا يُحسب له فتح صفحتين، فالبيكسل هناك يشتغل من
+    // الإعدادات التي خزّنها bootstrap للتوّ.
+    window.BWSPixel?.refresh();
+
     injectChrome();
     updateCartBadge();
     wireSearchPanel();
@@ -1089,6 +1094,7 @@ function wireProductCards(grid, products, favoritesMode) {
             addBtn.addEventListener('click', () => {
                 const product = productByUuid.get(uuid);
                 if (BWS.addToCart(product, 1)) {
+                    window.BWSPixel?.addToCart(product, 1);
                     updateCartBadge();
                     if (document.getElementById('cartSidebar')?.classList.contains('open')) {
                         renderCartSidebar();
@@ -1241,6 +1247,7 @@ function renderCartPage() {
             const deliveryType = document.getElementById('ckDelivery')?.value || 'home';
             if (!name || !phone) { showToast('الرجاء إدخال الاسم ورقم الهاتف'); return; }
             if (!wilaya) { showToast('الرجاء اختيار الولاية'); return; }
+            window.BWSPixel?.initiateCheckoutOnce(BWS.getCart(), BWS.cartTotal());
             checkoutBtn.disabled = true;
             checkoutBtn.textContent = 'جاري الإرسال...';
             const items = BWS.getCart().map(it => ({
@@ -1252,11 +1259,15 @@ function renderCartPage() {
                 unitQty: Number(it.unitQty) || 0,
                 sizes: Array.isArray(it.sizes) ? it.sizes : []
             }));
+            // قيمة الشراء = ثمن المنتجات فقط (بلا التوصيل) كي يبقى مقياس العائد
+            // على الإعلان معبّراً عن المبيعات لا عن رسوم الشحن.
+            const goodsTotal = BWS.cartTotal();
             const result = await BWS.submitGuestOrder({
                 items, name, phone, wilaya, baladiya, deliveryType, notes,
                 delivery: cartDeliveryFee()
             });
             if (result.ok) {
+                window.BWSPixel?.purchase(items, goodsTotal, { orderId: result.uuid, name, phone });
                 BWS.clearCart();
                 renderCartPage();
                 updateCartBadge();
@@ -1274,13 +1285,22 @@ function renderCartPage() {
             setTimeout(() => { window.location.href = withTenant('login.html'); }, 1200);
             return;
         }
+        window.BWSPixel?.initiateCheckoutOnce(BWS.getCart(), BWS.cartTotal());
         checkoutBtn.disabled = true;
         checkoutBtn.textContent = 'جاري الإرسال...';
+        // السلة تُفرَغ داخل submitOrder — نلتقط محتواها وقيمتها قبل الإرسال.
+        const orderedItems = BWS.getCart();
+        const goodsTotal = BWS.cartTotal();
         const result = await BWS.submitOrder({
             name: session.name || session.username,
             phone: session.phone || ''
         });
         if (result.ok) {
+            window.BWSPixel?.purchase(orderedItems, goodsTotal, {
+                orderId: result.uuid,
+                name: session.name || session.username,
+                phone: session.phone || ''
+            });
             renderCartPage();
             updateCartBadge();
             showToast('تم إرسال طلبك. سيتواصل معك المتجر قريبًا.');

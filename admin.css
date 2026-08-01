@@ -3,74 +3,329 @@
     background-color: #f1f3f6;
 }
 
-/* ----- Login page ----- */
+/* ===== Login page =====
+ * Calm by design: a neutral canvas lit by a soft wash of the store's own colour
+ * instead of a full-screen saturated gradient, so the eye rests on the card and
+ * the form — not on the background. Every accent still comes from --primary, so
+ * each store keeps its identity. --primary-rgb (set inline by the page script)
+ * lets the accents carry transparency; the value below is the fallback.
+ */
+:root {
+    --primary-rgb: 237, 90, 26;
+}
+
 .login-page {
+    position: relative;
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, var(--primary-light) 0%, var(--primary-dark) 100%);
-    padding: 24px;
+    padding: 28px 20px;
+    background-color: #eef1f6;
+    overflow: hidden;
+}
+
+/* Soft coloured light, top-start and bottom-end. Opacity (not colour-mix) keeps
+   this working on the older Android WebViews some customers browse with. */
+.login-page::before,
+.login-page::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    filter: blur(70px);
+}
+
+.login-page::before {
+    inset-block-start: -22%;
+    inset-inline-end: -14%;
+    width: 62vmax;
+    height: 62vmax;
+    background: var(--primary-light);
+    opacity: 0.28;
+}
+
+.login-page::after {
+    inset-block-end: -28%;
+    inset-inline-start: -18%;
+    width: 55vmax;
+    height: 55vmax;
+    background: var(--primary);
+    opacity: 0.16;
 }
 
 .login-card {
-    background-color: white;
+    position: relative;
+    z-index: 1;
+    background-color: #fff;
     width: 100%;
-    max-width: 380px;
-    border-radius: 12px;
-    padding: 32px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.18);
+    max-width: 400px;
+    border-radius: 20px;
+    padding: 34px 30px 28px;
+    border: 1px solid rgba(17, 24, 39, 0.06);
+    box-shadow:
+        0 1px 2px rgba(16, 24, 40, 0.04),
+        0 12px 26px -10px rgba(16, 24, 40, 0.16),
+        0 34px 60px -30px rgba(16, 24, 40, 0.28);
     text-align: center;
+    animation: loginCardIn 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes loginCardIn {
+    from { opacity: 0; transform: translateY(14px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
 }
 
 .login-logo {
     display: flex;
     justify-content: center;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
 }
 
 .login-logo .logo-circle {
-    background-color: var(--primary);
-    color: white;
-    width: 64px;
-    height: 64px;
-    font-size: 22px;
+    width: 58px;
+    height: 58px;
+    border-radius: 18px;
+    background: linear-gradient(140deg, var(--primary-light), var(--primary-dark));
+    color: #fff;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    box-shadow: 0 8px 18px -6px rgba(var(--primary-rgb), 0.55);
+}
+
+/* Store logo (when the shop uploaded one) replaces the initials block. */
+.login-logo .logo-img {
+    width: 62px;
+    height: 62px;
+    border-radius: 18px;
+    object-fit: contain;
+    background-color: #fff;
+    border: 1px solid var(--border);
+    padding: 6px;
 }
 
 .login-card h1 {
-    font-size: 22px;
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
     margin-bottom: 4px;
 }
 
 .login-subtitle {
     color: var(--text-muted);
     font-size: 13px;
-    margin-bottom: 24px;
+    margin-bottom: 22px;
+}
+
+/* The store name, when the link identifies the shop. */
+.login-subtitle.tenant-name {
+    display: inline-block;
+    margin-bottom: 6px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background-color: rgba(var(--primary-rgb), 0.09);
+    color: var(--primary-dark);
+    font-size: 12.5px;
+    font-weight: 600;
 }
 
 .admin-form {
     text-align: start;
 }
 
+/* `display:` on .login-error / .tenant-name would otherwise beat the UA rule
+   for the `hidden` attribute the scripts toggle. */
+.login-card [hidden] {
+    display: none !important;
+}
+
+.login-card .form-group {
+    margin-bottom: 13px;
+}
+
+.login-card .form-group label {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #6b7280;
+    margin-bottom: 6px;
+}
+
+/* Input + leading icon (+ optional trailing button). */
+.login-card .field {
+    position: relative;
+    display: block;
+}
+
+.login-card .field-icon {
+    position: absolute;
+    inset-inline-start: 13px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    color: #9ca3af;
+    pointer-events: none;
+    transition: color 0.18s ease;
+}
+
+.login-card .form-group input {
+    height: 48px;
+    padding: 0 14px;
+    background-color: #f7f8fa;
+    border: 1px solid #e5e8ef;
+    border-radius: 12px;
+    font-size: 15px;
+    color: var(--text-dark);
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.login-card .field input {
+    padding-inline-start: 42px;
+}
+
+.login-card .field.has-toggle input {
+    padding-inline-end: 44px;
+}
+
+.login-card .form-group input::placeholder {
+    color: #b3b9c4;
+}
+
+.login-card .form-group input:hover {
+    border-color: #d6dae3;
+}
+
+.login-card .form-group input:focus {
+    background-color: #fff;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.14);
+}
+
+.login-card .field:focus-within .field-icon {
+    color: var(--primary);
+}
+
+/* Show / hide password */
+.login-card .field-toggle {
+    position: absolute;
+    inset-inline-end: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
+    color: #9ca3af;
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.login-card .field-toggle:hover {
+    color: var(--text-dark);
+    background-color: rgba(17, 24, 39, 0.05);
+}
+
+.login-card .field-toggle svg {
+    width: 18px;
+    height: 18px;
+}
+
 .login-error {
-    background-color: rgba(192, 57, 43, 0.1);
-    color: var(--danger);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background-color: rgba(220, 38, 38, 0.08);
+    color: #b42318;
     padding: 10px 12px;
-    border-radius: var(--radius);
+    border-radius: 10px;
+    border-inline-start: 3px solid #e5544a;
     font-size: 13px;
+    line-height: 1.5;
     margin-bottom: 14px;
+    text-align: start;
+    animation: loginErrIn 0.24s ease both;
+}
+
+.login-error svg {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+}
+
+@keyframes loginErrIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: none; }
 }
 
 .login-btn {
     width: 100%;
+    height: 48px;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    padding: 0 20px;
     border: none;
+    border-radius: 12px;
+    background: linear-gradient(140deg, var(--primary), var(--primary-dark));
+    color: #fff;
+    font-size: 15.5px;
+    font-weight: 700;
     cursor: pointer;
+    box-shadow: 0 8px 18px -8px rgba(var(--primary-rgb), 0.65);
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.login-btn:hover:not(:disabled) {
+    filter: brightness(1.05);
+    transform: translateY(-1px);
+    box-shadow: 0 12px 22px -8px rgba(var(--primary-rgb), 0.7);
+}
+
+.login-btn:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 5px 12px -6px rgba(var(--primary-rgb), 0.6);
+}
+
+.login-btn:disabled {
+    cursor: default;
+    filter: saturate(0.85);
+    opacity: 0.8;
+    box-shadow: none;
+}
+
+/* Spinner shown while the credentials are being checked. */
+.login-btn .btn-spinner {
+    width: 17px;
+    height: 17px;
+    border: 2px solid rgba(255, 255, 255, 0.45);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: btnSpin 0.7s linear infinite;
+}
+
+@keyframes btnSpin {
+    to { transform: rotate(360deg); }
+}
+
+/* Visible keyboard focus everywhere on the card. */
+.login-card :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
 }
 
 .login-hint {
     margin-top: 18px;
     font-size: 12px;
     color: var(--text-muted);
+    line-height: 1.6;
 }
 
 .login-hint code {
@@ -81,9 +336,65 @@
 }
 
 .login-card .back-link {
-    display: block;
-    margin-top: 18px;
+    display: inline-block;
+    margin-top: 16px;
     font-size: 13px;
+    color: var(--text-muted);
+    transition: color 0.15s ease;
+}
+
+.login-card .back-link:hover {
+    color: var(--primary);
+}
+
+@media (max-width: 420px) {
+    .login-page { padding: 18px 14px; }
+    .login-card { padding: 28px 20px 24px; border-radius: 18px; }
+}
+
+/* Respect the reader's motion preference. */
+@media (prefers-reduced-motion: reduce) {
+    .login-card,
+    .login-error { animation: none; }
+    .login-btn:hover:not(:disabled) { transform: none; }
+    .login-btn .btn-spinner { animation-duration: 1.6s; }
+}
+
+/* ----- Dark mode: same layout, restful contrast ----- */
+@media (prefers-color-scheme: dark) {
+    .login-page { background-color: #0f1319; }
+    .login-page::before { opacity: 0.22; }
+    .login-page::after { opacity: 0.14; }
+
+    .login-card {
+        background-color: #171c25;
+        border-color: rgba(255, 255, 255, 0.07);
+        box-shadow: 0 24px 60px -28px rgba(0, 0, 0, 0.8);
+        color: #e7e9ee;
+    }
+
+    .login-card h1 { color: #f2f4f8; }
+    .login-subtitle { color: #98a1b0; }
+    .login-card .form-group label { color: #9aa3b2; }
+
+    .login-card .form-group input {
+        background-color: #1e242f;
+        border-color: #2b323e;
+        color: #eef1f6;
+    }
+
+    .login-card .form-group input:hover { border-color: #39414f; }
+
+    .login-card .form-group input:focus {
+        background-color: #212836;
+        border-color: var(--primary);
+    }
+
+    .login-card .form-group input::placeholder { color: #6b7484; }
+    .login-card .field-toggle:hover { background-color: rgba(255, 255, 255, 0.07); }
+    .login-error { background-color: rgba(239, 68, 68, 0.14); color: #ffb4ab; }
+    .login-logo .logo-img { background-color: #fff; border-color: #2b323e; }
+    .login-hint, .login-card .back-link { color: #8d95a3; }
 }
 
 /* ----- Admin layout ----- */

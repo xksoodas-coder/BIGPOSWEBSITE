@@ -82,6 +82,16 @@ export default async function handler(req, res) {
                 res.status(400).json({ error: 'إعدادات غير صالحة' });
                 return;
             }
+            // معرّف بيكسل ميتا: أرقام فقط. يُعقَّم هنا أيضاً (لا في المتصفح وحده)
+            // لأن هذه القيمة تُمرَّر لاحقاً إلى سكربت ميتا في صفحات كل الزوّار.
+            if ('metaPixelId' in incoming) {
+                const px = String(incoming.metaPixelId || '').trim();
+                if (px && !/^\d{5,20}$/.test(px)) {
+                    res.status(400).json({ error: 'معرّف البيكسل غير صالح' });
+                    return;
+                }
+                incoming.metaPixelId = px;
+            }
             const json = JSON.stringify(incoming);
             // حدّ حجم وقائي (≈ 768KB) لمنع تخزين حمولة ضخمة.
             // رُفِع من 256KB ليتّسع لصور البانر الإعلاني (حتى 4) المخزّنة كـ base64.

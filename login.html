@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
     <title>BigWebStore - تسجيل دخول الزبون</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="admin.css">
@@ -11,32 +12,77 @@
     <div class="login-page">
         <div class="login-card">
             <div class="login-logo">
-                <div class="logo-circle"><span>BS</span></div>
+                <div class="logo-circle" id="loginLogo"><span>BS</span></div>
             </div>
+            <p class="login-subtitle tenant-name" id="tenantName" hidden></p>
             <h1>تسجيل دخول الزبون</h1>
-            <p class="login-subtitle" id="tenantName" hidden></p>
-            <p class="login-subtitle" id="loginSubtitle">BigWebStore — وصول خاص</p>
+            <p class="login-subtitle" id="loginSubtitle">أدخل بياناتك للمتابعة إلى المتجر</p>
 
             <form id="customerLoginForm" class="admin-form">
                 <div class="form-group">
                     <label for="cUsername">اسم المستخدم</label>
-                    <input type="text" id="cUsername" autocomplete="username" required>
+                    <span class="field">
+                        <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                        <input type="text" id="cUsername" autocomplete="username"
+                               placeholder="اسم المستخدم" required>
+                    </span>
                 </div>
+
                 <div class="form-group">
                     <label for="cPassword">كلمة المرور</label>
-                    <input type="password" id="cPassword" autocomplete="current-password" required>
+                    <span class="field has-toggle">
+                        <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="4" y="10.5" width="16" height="10" rx="2.5"/>
+                            <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>
+                        </svg>
+                        <input type="password" id="cPassword" autocomplete="current-password"
+                               placeholder="••••••••" required>
+                        <button type="button" class="field-toggle" id="togglePassword"
+                                aria-label="إظهار كلمة المرور" aria-pressed="false" title="إظهار كلمة المرور">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/>
+                                <circle cx="12" cy="12" r="2.8"/>
+                            </svg>
+                        </button>
+                    </span>
                 </div>
+
                 <div class="form-group" id="storeIdGroup">
                     <label for="cStoreId">رمز المتجر (Store ID)</label>
-                    <input type="text" id="cStoreId">
+                    <span class="field">
+                        <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 9.5 4.6 5A2 2 0 0 1 6.5 4h11a2 2 0 0 1 1.9 1L21 9.5"/>
+                            <path d="M3 9.5h18v10a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5Z"/>
+                            <path d="M9 21v-5.5h6V21"/>
+                        </svg>
+                        <input type="text" id="cStoreId" placeholder="رمز المتجر">
+                    </span>
                 </div>
-                <div class="login-error" id="customerLoginError" hidden></div>
-                <button type="submit" class="primary-btn login-btn" id="loginSubmitBtn">دخول</button>
+
+                <div class="login-error" id="customerLoginError" role="alert" aria-live="polite" hidden>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="9"/><path d="M12 7.5v5"/><path d="M12 16.2h.01"/>
+                    </svg>
+                    <span id="customerLoginErrorText"></span>
+                </div>
+
+                <button type="submit" class="primary-btn login-btn" id="loginSubmitBtn">
+                    <span id="loginBtnLabel">دخول</span>
+                </button>
             </form>
         </div>
     </div>
 
     <script src="data.js"></script>
+    <script src="pixel.js"></script>
     <script>
         function withStore(url) {
             try {
@@ -46,26 +92,73 @@
             } catch { return url; }
         }
 
+        // "#ed5a1a" → "237, 90, 26", so the accents (focus ring, glow, badge)
+        // can carry transparency in the store's own colour.
+        function hexToRgb(hex) {
+            const m = /^#?([a-f\d]{3}|[a-f\d]{6})$/i.exec(String(hex || '').trim());
+            if (!m) return '';
+            let h = m[1];
+            if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+            const n = parseInt(h, 16);
+            return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+        }
+
+        // Initials for the logo badge: "متجر الأمل" → "مأ", "ASD Store" → "AS".
+        function initialsOf(name) {
+            const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+            if (!words.length) return '';
+            const letters = words.slice(0, 2).map(w => Array.from(w)[0]).join('');
+            return letters.toUpperCase();
+        }
+
+        function showError(msg) {
+            const box = document.getElementById('customerLoginError');
+            document.getElementById('customerLoginErrorText').textContent = msg;
+            box.hidden = false;
+        }
+
         document.addEventListener('DOMContentLoaded', async () => {
             const settings = BWS.getSettings();
             const root = document.documentElement;
             root.style.setProperty('--primary', settings.theme.primary);
             root.style.setProperty('--primary-dark', settings.theme.primaryDark);
             root.style.setProperty('--primary-light', settings.theme.primaryLight);
+            const rgb = hexToRgb(settings.theme.primary);
+            if (rgb) root.style.setProperty('--primary-rgb', rgb);
+
+            // Show / hide the password — comfort, and fewer failed logins.
+            const passInput = document.getElementById('cPassword');
+            const toggle = document.getElementById('togglePassword');
+            toggle.addEventListener('click', () => {
+                const show = passInput.type === 'password';
+                passInput.type = show ? 'text' : 'password';
+                toggle.setAttribute('aria-pressed', String(show));
+                const label = show ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور';
+                toggle.setAttribute('aria-label', label);
+                toggle.setAttribute('title', label);
+                passInput.focus({ preventScroll: true });
+            });
 
             // Which store is this link/domain? The host itself carries the slug
             // on a store subdomain (asd.<root>), so hide the store-code field
             // immediately — before/independently of the server round-trip.
             const onStoreHost = !!BWS.tenantHostSlug();
             const storeIdGroup = document.getElementById('storeIdGroup');
-            if (onStoreHost) storeIdGroup.style.display = 'none';
+            if (onStoreHost) storeIdGroup.hidden = true;
 
             const tenant = await BWS.resolveTenant();
             const tenantActive = tenant && tenant.found && tenant.active !== false;
 
+            // بيكسل المتجر يشتغل هنا من الإعدادات المخزَّنة محلياً فقط (pixel.js
+            // يقرأها عند تحميله). لا نطلبها من الخادم في هذه الصفحة عمداً: صفحة
+            // الدخول تُفتح لكل زائر، وطلب إضافي = قراءات Turso إضافية لكل زيارة.
+            // الزائر القادم من إعلان يمرّ أولاً على صفحة المتجر التي تجلب
+            // الإعدادات (bootstrap) قبل تحويله إلى هنا، فيصل الحدث كما ينبغي.
+
             if (tenant && tenant.found && tenant.active === false) {
                 document.querySelector('.login-card').innerHTML =
-                    '<h1>هذا المتجر غير متاح حاليًا</h1>';
+                    '<h1>هذا المتجر غير متاح حاليًا</h1>'
+                    + '<p class="login-subtitle">يرجى المحاولة لاحقًا أو التواصل مع المتجر.</p>';
                 return;
             }
 
@@ -80,17 +173,23 @@
             // Host header at login time, so a failed/slow tenant lookup here must
             // never degrade the page into asking the customer for a code.
             if ((tenantActive || onStoreHost) && !unregisteredHost) {
-                storeIdGroup.style.display = 'none';
+                storeIdGroup.hidden = true;
                 document.getElementById('cStoreId').required = false;
-                const nameEl = document.getElementById('tenantName');
-                if (tenant && tenant.name) { nameEl.textContent = tenant.name; nameEl.hidden = false; }
+                if (tenant && tenant.name) {
+                    const nameEl = document.getElementById('tenantName');
+                    nameEl.textContent = tenant.name;
+                    nameEl.hidden = false;
+                    document.getElementById('loginSubtitle').textContent =
+                        'أدخل بياناتك للمتابعة إلى متجرك';
+                    const ini = initialsOf(tenant.name);
+                    if (ini) document.querySelector('#loginLogo span').textContent = ini;
+                    document.title = tenant.name + ' — تسجيل الدخول';
+                }
             } else {
-                storeIdGroup.style.display = '';
+                storeIdGroup.hidden = false;
                 document.getElementById('cStoreId').required = true;
                 if (unregisteredHost) {
-                    const errEl0 = document.getElementById('customerLoginError');
-                    errEl0.textContent = 'هذا العنوان غير مربوط بأي متجر. يرجى إدخال رمز المتجر أو التواصل مع المزوّد.';
-                    errEl0.hidden = false;
+                    showError('هذا العنوان غير مربوط بأي متجر. يرجى إدخال رمز المتجر أو التواصل مع المزوّد.');
                 }
             }
 
@@ -106,18 +205,22 @@
                 }
             }
 
+            document.getElementById('cUsername').focus({ preventScroll: true });
+
             const form = document.getElementById('customerLoginForm');
             const errEl = document.getElementById('customerLoginError');
             const submitBtn = document.getElementById('loginSubmitBtn');
+            const btnLabel = document.getElementById('loginBtnLabel');
 
             form.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 errEl.hidden = true;
                 submitBtn.disabled = true;
-                submitBtn.textContent = 'جاري التحقق...';
+                btnLabel.textContent = 'جاري التحقق...';
+                submitBtn.insertAdjacentHTML('afterbegin', '<span class="btn-spinner"></span>');
 
                 const username = document.getElementById('cUsername').value;
-                const password = document.getElementById('cPassword').value;
+                const password = passInput.value;
                 // On a store host the server derives the store from the Host
                 // header — never send a (hidden, empty) code.
                 const storeId = (tenantActive || (onStoreHost && !unregisteredHost))
@@ -125,12 +228,15 @@
 
                 const result = await BWS.customerLogin(username, password, storeId);
                 if (result.ok) {
+                    btnLabel.textContent = 'تم — جاري الدخول';
                     window.location.href = withStore('index.html');
                 } else {
-                    errEl.hidden = false;
-                    errEl.textContent = result.error;
+                    showError(result.error);
                     submitBtn.disabled = false;
-                    submitBtn.textContent = 'دخول';
+                    const sp = submitBtn.querySelector('.btn-spinner');
+                    if (sp) sp.remove();
+                    btnLabel.textContent = 'دخول';
+                    passInput.focus({ preventScroll: true });
                 }
             });
         });
