@@ -40,9 +40,18 @@ const BWSPixel = (function () {
     let _amEnabled = false;  // advanced matching (opt-in, per store)
 
     // ----- settings -----
-    function settings() {
-        try { return (window.BWS && BWS.getSettings) ? BWS.getSettings() : null; }
+    // data.js يُعرّف `const BWS`، وهو تعريف معجمي عام لا يُعلَّق على `window`،
+    // لذلك الفحص هنا بـ typeof وليس بـ window.BWS (فحصُ window كان يُبقي البيكسل
+    // معطَّلاً دائماً رغم صحّة الإعدادات).
+    function bws() {
+        try { return (typeof BWS !== 'undefined' && BWS) ? BWS : null; }
         catch { return null; }
+    }
+    function settings() {
+        try {
+            const b = bws();
+            return (b && b.getSettings) ? b.getSettings() : null;
+        } catch { return null; }
     }
     function readId() {
         const s = settings();
@@ -98,7 +107,13 @@ const BWSPixel = (function () {
         return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
     }
     function priceOf(p) {
-        try { return money(BWS.effectivePrice(p)); } catch { return money(p && p.price); }
+        const b = bws();
+        try { return money(b.effectivePrice(p)); } catch { return money(p && p.price); }
+    }
+    function familyLabel(family) {
+        const b = bws();
+        try { return (b && b.displayFamilies) ? b.displayFamilies(family) : ''; }
+        catch { return ''; }
     }
     // Meta's `contents` / `content_ids` for a list of cart-shaped items.
     function contentsOf(items) {
@@ -175,7 +190,7 @@ const BWSPixel = (function () {
                 content_type: 'product',
                 content_ids: [String(p.uuid)],
                 content_name: p.name || '',
-                content_category: (window.BWS && BWS.displayFamilies) ? BWS.displayFamilies(p.family) : '',
+                content_category: familyLabel(p.family),
                 value: priceOf(p),
                 currency: CURRENCY
             });
