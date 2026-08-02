@@ -114,8 +114,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (!p) { page.innerHTML = '<div class="empty-state"><h2>المنتج غير متاح</h2></div>'; return; }
 
-    renderProduct(p, direct);
+    // التتبّع قبل الرسم: خطأ في العرض يجب ألّا يمنع تسجيل مشاهدة المنتج.
     window.BWSPixel?.viewContent(p);
+    renderProduct(p, direct);
 });
 
 function renderProduct(p, direct) {

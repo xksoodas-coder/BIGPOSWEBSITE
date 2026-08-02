@@ -128,7 +128,10 @@ const BWS = (function () {
         metaPixelId: '',
         // المطابقة المتقدمة: إرسال هاتف/اسم الزبون (مشفَّرَين من طرف ميتا في
         // المتصفح) مع حدث الشراء لتحسين نسبة المطابقة. اختياري، معطَّل افتراضياً.
-        metaAdvancedMatching: false
+        metaAdvancedMatching: false,
+        // استثناء الزبائن المسجَّلين (تجّار الجملة عادةً، ولا يأتون من الإعلان)
+        // من التتبّع كلياً. معطَّل افتراضياً كي لا يفقد أي متجر تتبّعه فجأة.
+        metaExcludeRegistered: false
     };
 
     // معرّف البيكسل أرقام فقط (15–16 رقماً لدى ميتا). التعقيم هنا يضمن أن ما
@@ -246,7 +249,8 @@ const BWS = (function () {
             showOutOfStock: raw.showOutOfStock !== false,
             productButtons: parseProductButtons(raw.productButtons),
             metaPixelId: cleanPixelId(raw.metaPixelId),
-            metaAdvancedMatching: raw.metaAdvancedMatching === true
+            metaAdvancedMatching: raw.metaAdvancedMatching === true,
+            metaExcludeRegistered: raw.metaExcludeRegistered === true
         };
     }
     function setSettings(next) {

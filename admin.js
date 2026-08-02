@@ -414,6 +414,7 @@ function wireSettingsPage() {
         showOutOfStock: document.getElementById('showOutOfStock'),
         metaPixelId: document.getElementById('metaPixelId'),
         metaAdvancedMatching: document.getElementById('metaAdvancedMatching'),
+        metaExcludeRegistered: document.getElementById('metaExcludeRegistered'),
         btnGuestOrder: document.getElementById('btnGuestOrder'),
         btnGuestCart: document.getElementById('btnGuestCart'),
         btnGuestFav: document.getElementById('btnGuestFav'),
@@ -506,6 +507,9 @@ function wireSettingsPage() {
         if (fields.metaPixelId) fields.metaPixelId.value = s.metaPixelId || '';
         if (fields.metaAdvancedMatching) {
             fields.metaAdvancedMatching.checked = s.metaAdvancedMatching === true;
+        }
+        if (fields.metaExcludeRegistered) {
+            fields.metaExcludeRegistered.checked = s.metaExcludeRegistered === true;
         }
         const pb = (s.productButtons && typeof s.productButtons === 'object') ? s.productButtons : {};
         const g = pb.guest || {}, rg = pb.registered || {};
@@ -658,6 +662,7 @@ function wireSettingsPage() {
             showOutOfStock: fields.showOutOfStock ? !!fields.showOutOfStock.checked : true,
             metaPixelId: px === null ? String(preserved.metaPixelId || '') : px,
             metaAdvancedMatching: !!fields.metaAdvancedMatching?.checked,
+            metaExcludeRegistered: !!fields.metaExcludeRegistered?.checked,
             productButtons: {
                 guest: {
                     order: !!fields.btnGuestOrder?.checked,

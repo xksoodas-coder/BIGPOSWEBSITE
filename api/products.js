@@ -5,9 +5,11 @@ import { getCatalog, getFamilyPage } from './_lib/turso-catalog.js';
 import { splitFamilies } from './_lib/families.js';
 import { buyerPricingLive, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
 import { getStoreDiscounts, applyDiscount } from './_lib/discounts.js';
+import { getStoreNewFlags, setNewFlag } from './_lib/newflags.js';
+import { readSessionFromRequest } from './_lib/session.js';
 
 /**
- * GET /api/products?family=<name>&favorites=1&limit=&offset=
+ * GET /api/products?family=<name>&favorites=1&filter=new|discount&limit=&offset=
  * Auth: Bearer <session token> (logged-in customer) OR a guest on a
  * 'direct'-mode (public) store — storeId comes from the token/tenant.
  *
@@ -18,6 +20,11 @@ import { getStoreDiscounts, applyDiscount } from './_lib/discounts.js';
  * happens at most once per snapshot TTL.
  */
 export default async function handler(req, res) {
+    // كتابة الأدمين الوحيدة هنا: تشغيل/إطفاء علم «جديد» لمنتج (عرضي فقط).
+    if (req.method === 'POST') {
+        await handleAdminFlagPost(req, res);
+        return;
+    }
     if (req.method !== 'GET') {
         res.status(405).json({ error: 'Method not allowed' });
         return;
@@ -52,6 +59,11 @@ export default async function handler(req, res) {
         // بحث نصّي بالاسم (من تطبيق المتجر) — يُصفّى على الخادم فلا يُنزَّل الكتالوج
         // كاملاً إلى الهاتف؛ يُعاد فقط صفحة النتائج المطابقة.
         const q = (req.query?.q || '').toString().trim().toLowerCase();
+        // فلتر عرضي من القائمة الجانبية في تطبيق المتجر:
+        //   new      → المنتجات المعلَّمة «جديد» من لوحة الأدمين (الأحدث أولاً)
+        //   discount → المنتجات التي عليها تخفيض ساري
+        // كلاهما يُصفّى على الخادم فوق الكتالوج المخزَّن مؤقتًا (بلا قراءات إضافية).
+        const filter = (req.query?.filter || '').toString().trim().toLowerCase();
         // Optional server-side pagination (used by the "all products" storefront
         // mode). limit<=0 / missing → return everything.
         const limit = Math.max(0, parseInt(req.query?.limit, 10) || 0);
@@ -86,11 +98,14 @@ export default async function handler(req, res) {
 
         // تخفيضات المتجر (يضبطها الأدمين) — تُطبَّق بعد إسقاط الأسعار.
         const discounts = await getStoreDiscounts(storeId);
+        // أعلام «جديد» — تُقرأ دائمًا (لا مع الفلتر فقط) كي تظهر شارة «جديد»
+        // على المنتج في كل مكان: البحث، التصنيف، المفضلة… (قراءة/30ث لكل متجر).
+        const newFlags = await getStoreNewFlags(storeId);
 
         // ── المسار المُحسَّن: تصفّح عائلة بترقيم صفحات ──
         // نقرأ صفحة الـ limit فقط من Supabase (لا الكتالوج كاملاً) → قراءات أقل.
         // يُستخدم فقط مع (عائلة محدّدة + ليس المفضّلة + بلا بحث نصّي + limit>0). أي خطأ → تراجُع.
-        if (familyFilter && !favoritesOnly && !q && limit > 0) {
+        if (familyFilter && !favoritesOnly && !q && !filter && limit > 0) {
             try {
                 const { products: pageRows, total } = await getFamilyPage(
                     storeId, familyFilter, { hideOOS, limit, offset });
@@ -98,6 +113,7 @@ export default async function handler(req, res) {
                     const proj = projectProductPrices(p, allowed, pricePerProduct);
                     applyDiscount(proj, discounts.get(p.uuid));
                     proj.isFavorite = favSet.has(p.uuid);
+                    proj.isNew = newFlags.has(p.uuid);
                     return proj;
                 });
                 setCacheHeaders();
@@ -121,10 +137,22 @@ export default async function handler(req, res) {
             if (q && !(p.name || '').toLowerCase().includes(q)) continue;
             const isFavorite = favSet.has(p.uuid);
             if (favoritesOnly && !isFavorite) continue;
+            const isNew = newFlags.has(p.uuid);
+            if (filter === 'new' && !isNew) continue;
             const proj = projectProductPrices(p, allowed, pricePerProduct);
             applyDiscount(proj, discounts.get(p.uuid));
+            // فلتر «تخفيضات»: بعد applyDiscount فقط، لأن التخفيض لا يُعتبر ساريًا
+            // إلا إذا كان السعر القديم أعلى فعلاً من السعر المعروض لهذا المشتري.
+            if (filter === 'discount' && !(proj.discountPercent > 0)) continue;
             proj.isFavorite = isFavorite;
+            proj.isNew = isNew;
+            if (isNew) proj.newAt = newFlags.get(p.uuid);
             products.push(proj);
+        }
+
+        // «منتجات جديدة»: الأحدث تعليمًا أولاً (ترتيب ثابت عبر الصفحات).
+        if (filter === 'new') {
+            products.sort((a, b) => String(b.newAt || '').localeCompare(String(a.newAt || '')));
         }
 
         const total = products.length;
@@ -135,5 +163,42 @@ export default async function handler(req, res) {
     } catch (err) {
         console.error('[products] error', err);
         res.status(500).json({ error: 'تعذّر تحميل المنتجات' });
+    }
+}
+
+/**
+ * POST /api/products   { action: 'setNew', uuid, value }   — جلسة أدمين فقط.
+ * يشغّل/يطفئ علم «جديد» على منتج. لا يكتب أي سعر ولا يمسّ turso_changelog؛
+ * مجرّد سجل عرضي في bws_product_flags. (مدمج هنا لا في ملف API جديد بسبب
+ * حدّ 12 دالة على Vercel.)
+ */
+async function handleAdminFlagPost(req, res) {
+    try {
+        const session = readSessionFromRequest(req);
+        if (!session || !session.storeId) {
+            res.status(401).json({ error: 'يجب تسجيل الدخول' });
+            return;
+        }
+        if (!session.isAdmin) {
+            res.status(403).json({ error: 'صلاحية الإدارة مطلوبة' });
+            return;
+        }
+        const action = String(req.body?.action || '').trim();
+        if (action !== 'setNew') {
+            res.status(400).json({ error: 'إجراء غير معروف' });
+            return;
+        }
+        const uuid = String(req.body?.uuid || '').trim();
+        if (!uuid) {
+            res.status(400).json({ error: 'معرّف المنتج مطلوب' });
+            return;
+        }
+        const value = req.body?.value === true;
+        await setNewFlag(session.storeId, uuid, value);
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(200).json({ ok: true, uuid, isNew: value });
+    } catch (err) {
+        console.error('[products] setNew error', err);
+        res.status(500).json({ error: 'تعذّر حفظ علامة «جديد»' });
     }
 }

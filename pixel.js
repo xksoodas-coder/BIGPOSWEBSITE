@@ -53,6 +53,24 @@ const BWSPixel = (function () {
             return (b && b.getSettings) ? b.getSettings() : null;
         } catch { return null; }
     }
+
+    // ----- نوع الزائر -----
+    // زبون مسجَّل = له حساب في المتجر (غالباً تاجر جملة يشتري بانتظام ولم يأتِ
+    // من إعلان)، وزائر عابر = وصل من رابط/إعلان ويطلب بملء معلوماته. التمييز
+    // يُرسَل مع كل حدث كي يمكن فرز تقارير الحملة، ويمكن للمتجر استثناء
+    // المسجَّلين كلياً حتى لا تُحسب مبيعات الجملة ضمن نتائج الإعلان.
+    function isRegistered() {
+        try {
+            const b = bws();
+            return !!(b && b.getCustomerSession && b.getCustomerSession()
+                      && b.getSessionToken && b.getSessionToken());
+        } catch { return false; }
+    }
+    function trackingAllowed() {
+        const s = settings();
+        if (s && s.metaExcludeRegistered === true && isRegistered()) return false;
+        return true;
+    }
     function readId() {
         const s = settings();
         const raw = String((s && s.metaPixelId) || '').trim();
@@ -79,6 +97,8 @@ const BWSPixel = (function () {
     function init() {
         const id = readId();
         if (!id || id === _id) return !!_id;
+        // زبون مسجَّل في متجر اختار استثناء المسجَّلين: لا يُحمَّل كود ميتا أصلاً.
+        if (!trackingAllowed()) return false;
         _id = id;
         _amEnabled = (settings() || {}).metaAdvancedMatching === true;
         loadSdk();
@@ -95,9 +115,13 @@ const BWSPixel = (function () {
             if (_queued.length < QUEUE_MAX) _queued.push({ name, params, opts });
             return;
         }
+        if (!trackingAllowed()) return;   // سجّل الزائر دخوله بعد بدء الجلسة
+        // customer_type يرافق كل حدث: يسمح بفرز «مبيعات الإعلان» عن «مبيعات
+        // الجملة» في تقارير ميتا دون الحاجة إلى استثنائهم من الأساس.
+        const payload = { ...(params || {}), customer_type: isRegistered() ? 'registered' : 'guest' };
         try {
-            if (opts) window.fbq('track', name, params || {}, opts);
-            else window.fbq('track', name, params || {});
+            if (opts) window.fbq('track', name, payload, opts);
+            else window.fbq('track', name, payload);
         } catch { /* an ad-blocker removed fbq — never break the storefront */ }
     }
 

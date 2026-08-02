@@ -257,9 +257,10 @@ function renderInitial() {
     _selectedProduct = _allProducts.find(p => p.uuid === selUuid) || null;
     _currentQty = 1;
     renderOrderPage();
+    // التتبّع قبل عرض «منتجات أخرى»: أي خطأ في العرض يجب ألّا يُسقط الحدث.
+    window.BWSPixel?.viewContent(_selectedProduct);
     renderRelatedProducts(selUuid);
     enrichSelected(_selectedProduct);
-    window.BWSPixel?.viewContent(_selectedProduct);
     _initialRendered = true;
 }
 
@@ -287,10 +288,10 @@ async function selectProduct(uuid, { push = true } = {}) {
     if (section) section.classList.add('swapping');
     renderOrderPage();                 // rebuilds + rebinds the top section
     restoreForm(form);
-    renderRelatedProducts(uuid);
-    enrichSelected(p);
     // التنقّل بين المنتجات هنا بلا إعادة تحميل — كل منتج يُعدّ «مشاهدة محتوى».
     window.BWSPixel?.viewContent(p);
+    renderRelatedProducts(uuid);
+    enrichSelected(p);
     if (section) requestAnimationFrame(() => section.classList.remove('swapping'));
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -764,8 +765,10 @@ function renderRelatedProducts(excludeUuid) {
     if (related.length === 0) return;
 
     // Update the heading to reflect that these belong to the same category.
+    // `family` هنا كان متغيّراً غير معرَّف أصلاً → ReferenceError يُوقف بقية الدالة،
+    // فلا يُعرض قسم «منتجات أخرى» إطلاقاً ويُجهض ما بعده في renderInitial.
     const titleEl = section.querySelector('.related-title');
-    if (titleEl && family) titleEl.textContent = 'منتجات أخرى من نفس التصنيف';
+    if (titleEl && selFamilies.length) titleEl.textContent = 'منتجات أخرى من نفس التصنيف';
 
     section.style.display = '';
     container.innerHTML = related.map(p => {
