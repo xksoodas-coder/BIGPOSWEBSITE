@@ -1362,11 +1362,13 @@ function ensureGuestCheckoutForm(summary) {
         populateCartBaladiyas(wilSel, balSel);
         updateCartDeliveryUI();
     });
+    // تغيير البلدية قد يغيّر السعر (سعر خاص بالبلدية يتجاوز سعر الولاية).
+    balSel?.addEventListener('change', updateCartDeliveryUI);
     document.getElementById('ckDelivery').addEventListener('change', updateCartDeliveryUI);
     updateCartDeliveryUI();
 }
 
-// سعر التوصيل الحالي في السلة (حسب الولاية ونوع التسليم؛ لكل ولاية سعرها).
+// سعر التوصيل الحالي في السلة (سعر الولاية، أو سعر البلدية الخاص إن ضُبط لها).
 function cartDeliveryFee() {
     const wilSel = document.getElementById('ckWilaya');
     if (!wilSel) return 0;
@@ -1374,7 +1376,8 @@ function cartDeliveryFee() {
     const wid = opt ? (opt.getAttribute('data-wid') || '') : '';
     if (!wid) return 0;
     const type = document.getElementById('ckDelivery')?.value || 'home';
-    return BWS.deliveryFee(wid, '', type);
+    const baladiya = (document.getElementById('ckBaladiya')?.value || '').trim();
+    return BWS.deliveryFee(wid, baladiya, type);
 }
 
 function updateCartDeliveryUI() {

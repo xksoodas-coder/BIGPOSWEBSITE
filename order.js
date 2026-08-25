@@ -606,12 +606,14 @@ function selectedWilayaId() {
     return opt ? (opt.getAttribute('data-wid') || '') : '';
 }
 
-// سعر التوصيل الحالي حسب الولاية ونوع التسليم (لكل ولاية سعرها).
+// سعر التوصيل الحالي حسب الولاية ونوع التسليم، مع مراعاة سعر البلدية الخاص
+// إن ضبطه الأدمين لها (وإلا فسعر الولاية).
 function currentDeliveryFee() {
     const wid = selectedWilayaId();
     if (!wid) return 0;
     const type = document.getElementById('ofDelivery')?.value || 'home';
-    return BWS.deliveryFee(wid, '', type);
+    const baladiya = (document.getElementById('ofBaladiya')?.value || '').trim();
+    return BWS.deliveryFee(wid, baladiya, type);
 }
 
 function updateSummary() {

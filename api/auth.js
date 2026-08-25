@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { getTursoClient, reduceChangelog } from './_lib/turso.js';
 import { signSession } from './_lib/session.js';
 import { resolveTenant } from './_lib/tenant.js';
-import { clientIp, isRateLimited, recordFailure, clearAttempts } from './_lib/ratelimit.js';
+import { clientIp, peekLimit, recordFailure, clearAttempts } from './_lib/ratelimit.js';
 import { findClientByUsername, priceTiersFromClient } from './_lib/clients.js';
 
 function isTruthy(v) {
@@ -43,7 +43,13 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { username, password, storeId, role } = req.body || {};
+        const { username, password, storeId, role, client: clientKind } = req.body || {};
+
+        // عمر جلسة الزبون: تطبيق الهاتف يحصل على جلسة طويلة جدًا (سنة) لأنه
+        // يخزّن الرمز على الجهاز ويجدّده صامتًا، فلا يُخرَج الزبون بعد غياب
+        // طويل. المتصفّح يبقى على أسبوع (رمز في localStorage على جهاز مشترك).
+        const isAppClient = String(clientKind || '').toLowerCase() === 'app';
+        const customerTtl = isAppClient ? 60 * 60 * 24 * 365 : 60 * 60 * 24 * 7;
 
         // Determine the store from the tenant (link/domain) when available — this
         // is trusted (server-resolved). Fall back to the store code typed by the
@@ -66,43 +72,25 @@ export default async function handler(req, res) {
         const uname = String(username).trim().toLowerCase();
         const client = getTursoClient();
 
-        // ── بوابة الإصدار (version): لا دخول لزبون أو أدمين إلا إذا كان إصدار
-        //    المتجر «clasicc» أو «pro» (يُقرأ من عمود version في turso_users).
-        //    سطر فارغ/قيمة أخرى → المتجر غير مُفعّل. فتح-آمن إن لم يوجد العمود بعد
-        //    (لئلا ينكسر الخادم قبل تهيئة العمود). ──
-        let storeVersion = '';
-        let versionColumnMissing = false;
-        try {
-            const vr = await client.execute({
-                sql: `SELECT version FROM turso_users WHERE store_id = ? LIMIT 1`,
-                args: [targetStore]
-            });
-            // تطبيع صارم: نُبقي الحروف اللاتينية الصغيرة فقط — يزيل المسافات
-            // وعلامات الاتجاه المخفية (RTL/LRM) وأي رموز غير مرئية قد تُلصق مع
-            // القيمة عند كتابتها في واجهة قاعدة البيانات.
-            storeVersion = String(vr.rows[0]?.version ?? '').toLowerCase().replace(/[^a-z]/g, '');
-        } catch {
-            versionColumnMissing = true; // العمود/الجدول غير موجود → لا تحجب
-        }
-        const isProVer = storeVersion === 'pro';
-        const isClassicVer = storeVersion === 'clasicc' || storeVersion === 'classic';
-        if (!versionColumnMissing && !isProVer && !isClassicVer) {
-            res.status(403).json({ error: 'هذا المتجر غير مُفعّل حاليًا. يرجى التواصل مع المزوّد.' });
-            return;
-        }
-        const storeVersionOut = versionColumnMissing
-            ? ''
-            : (isProVer ? 'pro' : (isClassicVer ? 'clasicc' : ''));
+        // ── لا بوابة تفعيل عند الدخول ──
+        // كان هنا فحصٌ يقرأ عمود `version` من turso_users ويرفض الدخول (403
+        // «هذا المتجر غير مُفعّل») ما لم تكن قيمته clasicc/pro. أُزيل نهائيًا:
+        //   • العمود ليس جزءًا من مزامنة المستخدمين، فكان يُمحى كلّما دفع جهاز
+        //     قديم (نسخة سابقة كانت تكتب INSERT OR REPLACE) صفَّ المستخدمين —
+        //     فيُحجب زبائن المتجر فجأة بلا سبب ظاهر.
+        //   • كان يكلّف رحلة إضافية لقاعدة البيانات في كل تسجيل دخول.
+        // ما يحدّد المتجر الآن هو store_id وحده. تعطيل متجر بالكامل يبقى ممكنًا
+        // عبر bws_tenants.is_active (يُفحص أعلاه عند حلّ المستأجر).
 
         // ── Brute-force throttle: per (store+username) and per IP, 15-min window ──
         const ip = clientIp(req);
         const userKey = `u:${targetStore}:${uname}`;
         const ipKey = `ip:${ip}`;
-        const [userLimited, ipLimited] = await Promise.all([
-            isRateLimited(client, userKey, RL_MAX_PER_USER, RL_WINDOW_MS),
-            isRateLimited(client, ipKey, RL_MAX_PER_IP, RL_WINDOW_MS)
+        const [userRl, ipRl] = await Promise.all([
+            peekLimit(client, userKey, RL_MAX_PER_USER, RL_WINDOW_MS),
+            peekLimit(client, ipKey, RL_MAX_PER_IP, RL_WINDOW_MS)
         ]);
-        if (userLimited || ipLimited) {
+        if (userRl.limited || ipRl.limited) {
             res.status(429).json({ error: 'محاولات كثيرة. يرجى الانتظار قليلاً ثم إعادة المحاولة.' });
             return;
         }
@@ -110,10 +98,15 @@ export default async function handler(req, res) {
             recordFailure(client, userKey, RL_WINDOW_MS),
             recordFailure(client, ipKey, RL_WINDOW_MS)
         ]);
-        const clearLoginAttempts = () => Promise.all([
-            clearAttempts(client, userKey),
-            clearAttempts(client, ipKey)
-        ]);
+        // الحذف يُنفَّذ فقط إن كان هناك عدّاد فعلًا (الحالة الغالبة: لا شيء) —
+        // فلا تُضاف رحلة كتابة لقاعدة البيانات إلى كل تسجيل دخول ناجح.
+        const clearLoginAttempts = () => {
+            const keys = [];
+            if (userRl.exists) keys.push(userKey);
+            if (ipRl.exists) keys.push(ipKey);
+            if (!keys.length) return Promise.resolve();
+            return Promise.all(keys.map(k => clearAttempts(client, k)));
+        };
 
         // ───────────────────────── Admin login (app users) ─────────────────────
         if (role === 'admin') {
@@ -171,7 +164,8 @@ export default async function handler(req, res) {
                 ok: true,
                 token,
                 isAdmin: true,
-                version: storeVersionOut, // '' | 'clasicc' | 'pro' — للتحكّم بالصلاحيات
+                // ثابتة للتوافق مع نسخ SOFT ADMIN المثبّتة (لم تعد تُقرأ من القاعدة).
+                version: 'pro',
                 customer: { name: user.Name || username, phone: '' }
             });
             return;
@@ -198,7 +192,6 @@ export default async function handler(req, res) {
             // التسعير الفعلي يُحلّ حيًّا من المرآة عند كل طلب (buyerPricingLive)،
             // فلا يُعتمد على هذه القيمة في العرض.
             const priceTiers = priceTiersFromClient(mirror) || [1];
-            const sevenDays = 60 * 60 * 24 * 7;
             const token = signSession({
                 storeId: targetStore,
                 customerUuid: mirror.uuid,
@@ -208,7 +201,7 @@ export default async function handler(req, res) {
                 priceTiers,
                 pricePerProduct: false, // سعر واحد لكل زبون في هذا النموذج
                 iat: Math.floor(Date.now() / 1000),
-                exp: Math.floor(Date.now() / 1000) + sevenDays
+                exp: Math.floor(Date.now() / 1000) + customerTtl
             });
             res.status(200).json({
                 ok: true,
@@ -279,7 +272,6 @@ export default async function handler(req, res) {
         if (priceTiers.length === 0) priceTiers.push(1);
         const pricePerProduct = isTruthy(match.data.PricePerProduct);
 
-        const sevenDays = 60 * 60 * 24 * 7;
         // customerId is the desktop DB primary key — invoices/payments/added
         // debts reference the customer by this number, so we carry it in the
         // session to compute the account balance later.
@@ -293,7 +285,7 @@ export default async function handler(req, res) {
             priceTiers,
             pricePerProduct,
             iat: Math.floor(Date.now() / 1000),
-            exp: Math.floor(Date.now() / 1000) + sevenDays
+            exp: Math.floor(Date.now() / 1000) + customerTtl
         });
 
         res.status(200).json({

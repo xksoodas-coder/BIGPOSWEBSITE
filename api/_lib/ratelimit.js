@@ -19,6 +19,29 @@ async function ensure(client) {
     _ready = true;
 }
 
+/**
+ * قراءة واحدة للعدّاد: { limited, exists }.
+ *
+ * لا تُنشئ الجدول (لا CREATE TABLE في مسار القراءة): إن كان مفقودًا يفشل
+ * الاستعلام ونفتح الباب (fail-open) — والكتابة في [recordFailure] هي من
+ * تُنشئه. هذا يوفّر رحلة كاملة لقاعدة البيانات في كل تسجيل دخول على نسخة
+ * باردة، و`exists` تسمح بتخطّي حذفٍ لا لزوم له بعد دخول ناجح.
+ */
+export async function peekLimit(client, key, max, windowMs) {
+    try {
+        const r = await client.execute({
+            sql: `SELECT count, window_start FROM bws_login_attempts WHERE rl_key = ?`,
+            args: [key]
+        });
+        if (!r.rows.length) return { limited: false, exists: false };
+        const row = r.rows[0];
+        const fresh = Date.now() - Number(row.window_start) <= windowMs;
+        return { limited: fresh && Number(row.count) >= max, exists: true };
+    } catch {
+        return { limited: false, exists: false }; // fail-open
+    }
+}
+
 /** Best-effort client IP from the proxy chain (Vercel sets x-forwarded-for). */
 export function clientIp(req) {
     const xff = (req.headers['x-forwarded-for'] || '').toString();
@@ -28,19 +51,8 @@ export function clientIp(req) {
 
 /** true when the key already reached `max` failures inside the current window. */
 export async function isRateLimited(client, key, max, windowMs) {
-    try {
-        await ensure(client);
-        const r = await client.execute({
-            sql: `SELECT count, window_start FROM bws_login_attempts WHERE rl_key = ?`,
-            args: [key]
-        });
-        if (!r.rows.length) return false;
-        const row = r.rows[0];
-        if (Date.now() - Number(row.window_start) > windowMs) return false; // window expired
-        return Number(row.count) >= max;
-    } catch {
-        return false; // fail-open: never block logins because the limiter errored
-    }
+    const { limited } = await peekLimit(client, key, max, windowMs);
+    return limited;
 }
 
 /** Increment the failure counter (starting a fresh window when expired). */

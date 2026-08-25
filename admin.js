@@ -494,8 +494,11 @@ function wireSettingsPage() {
         if (pprField) pprField.checked = true;
         const fprField = fields['fpr' + (s.familiesPerRow || 4)];
         if (fprField) fprField.checked = true;
+        // نحافظ على المفاتيح التي لا تُحرَّر هنا (أسعار البلديات الخاصة التي
+        // يضبطها تطبيق SOFT ADMIN MANAGER) بدل محوها عند الحفظ من الموقع.
         _delivery = (s.delivery && typeof s.delivery === 'object')
             ? {
+                ...s.delivery,
                 office: { ...(s.delivery.office || {}) },
                 home: collapseHomeAdmin(s.delivery.home)
               }

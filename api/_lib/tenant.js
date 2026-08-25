@@ -61,10 +61,21 @@ async function loadAll(client) {
     const hasCache = _cache.bySlug.size || _cache.byDomain.size;
     if (Date.now() - _cache.at < TTL_MS && hasCache) return;
     try {
-        await ensureTenantsTable(client);
-        const r = await client.execute(
-            `SELECT store_id, slug, custom_domain, display_name, is_active FROM bws_tenants`
-        );
+        // القراءة أولاً بلا تهيئة: كان كل تحديث للكاش يُرسل CREATE TABLE +
+        // فهرسين قبل الاستعلام، أي ثلاث رحلات إضافية لقاعدة البيانات على كل
+        // نسخة باردة (يظهر أثرها كبطء في تسجيل الدخول). التهيئة تُستدعى الآن
+        // فقط إذا كان الجدول غير موجود فعلاً.
+        let r;
+        try {
+            r = await client.execute(
+                `SELECT store_id, slug, custom_domain, display_name, is_active FROM bws_tenants`
+            );
+        } catch {
+            await ensureTenantsTable(client);
+            r = await client.execute(
+                `SELECT store_id, slug, custom_domain, display_name, is_active FROM bws_tenants`
+            );
+        }
         const byDomain = new Map();
         const bySlug = new Map();
         for (const row of r.rows) {

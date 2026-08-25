@@ -70,6 +70,10 @@ function shapeProduct(storeId, row) {
         imageUrl: imageVersion ? productImageUrl(storeId, uuid, imageVersion) : '',
         imageUrlLegacy: imageVersion ? productImageUrlLegacy(uuid, imageVersion) : '',
         barcode: row.barcode ?? '',
+        // تاريخا الإنتاج والصلاحية — يكتبهما تطبيق الهاتف في صفّ المنتج،
+        // ويعرضهما تطبيق المتجر في صفحة تفاصيل المنتج. '' = غير محدَّد.
+        manufactureDate: String(row.manufacture_date ?? ''),
+        expiryDate: String(row.expiry_date ?? ''),
         sizes
     };
 }

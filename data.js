@@ -111,7 +111,7 @@ const BWS = (function () {
         guestPriceTier: 1,
         // أسعار التوصيل: office = سعر المكتب لكل ولاية، home = سعر المنزل لكل ولاية
         // (كلاهما مفتاحه = معرّف الولاية؛ المنزل لم يعد يعتمد على البلدية).
-        delivery: { office: {}, home: {} },
+        delivery: { office: {}, home: {}, officeCommune: {}, homeCommune: {} },
         // صلاحية الطلب بالأحجام (لكل فئة): العابر / المسجَّل.
         sizeOrderGuest: false,
         sizeOrderRegistered: false,
@@ -192,6 +192,18 @@ const BWS = (function () {
         return out;
     }
 
+    // خريطة أسعار خام → أرقام فقط (تُستعمل لأسعار البلديات "wid|code").
+    // القيمة 0 تعني «توصيل مجاني» وتُحفظ كما هي.
+    function asPriceMap(m) {
+        if (!m || typeof m !== 'object') return {};
+        const out = {};
+        for (const k of Object.keys(m)) {
+            const n = Number(m[k]);
+            if (Number.isFinite(n)) out[k] = n;
+        }
+        return out;
+    }
+
     // Normalise the per-audience product-button visibility, filling any missing
     // flag from the defaults (so old saved settings keep working).
     function parseProductButtons(raw) {
@@ -203,6 +215,15 @@ const BWS = (function () {
         });
         raw = (raw && typeof raw === 'object') ? raw : {};
         return { guest: pick(raw.guest, d.guest), registered: pick(raw.registered, d.registered) };
+    }
+
+    // رمز البلدية من نصّ الخيار المعروض ("01001 - أدرار" → "01001"). يُستعمل
+    // مفتاحًا لأسعار التوصيل الخاصة بالبلدية (أثبت من الاسم عند تغيّر الكتابة).
+    function communeCodeOf(label) {
+        const s = String(label || '').trim();
+        if (!s) return '';
+        const m = s.match(/^(\d{3,6})\s*-/);
+        return m ? m[1] : '';
     }
 
     // ----- settings (admin) -----
@@ -241,9 +262,13 @@ const BWS = (function () {
             delivery: (raw.delivery && typeof raw.delivery === 'object')
                 ? {
                     office: (raw.delivery.office && typeof raw.delivery.office === 'object') ? raw.delivery.office : {},
-                    home: collapseHomeKeys(raw.delivery.home)
+                    home: collapseHomeKeys(raw.delivery.home),
+                    // أسعار خاصة ببلديات ("wid|code") يضبطها تطبيق SOFT ADMIN
+                    // MANAGER وتتقدّم على سعر الولاية. لا تُجمَّع كـ home.
+                    officeCommune: asPriceMap(raw.delivery.officeCommune),
+                    homeCommune: asPriceMap(raw.delivery.homeCommune)
                   }
-                : { office: {}, home: {} },
+                : { office: {}, home: {}, officeCommune: {}, homeCommune: {} },
             sizeOrderGuest: raw.sizeOrderGuest === true,
             sizeOrderRegistered: raw.sizeOrderRegistered === true,
             showOutOfStock: raw.showOutOfStock !== false,
@@ -995,19 +1020,26 @@ const BWS = (function () {
         },
 
         // ----- سعر التوصيل -----
-        // office: حسب الولاية (المعرّف). home: حسب البلدية ("wilayaId|label").
+        // سعر أساسي لكل ولاية:  office[wid] / home[wid]
+        // وسعر خاص اختياري لكل بلدية يتجاوزه: officeCommune["wid|code"] / homeCommune[…]
+        // (يضبطها تطبيق SOFT ADMIN MANAGER؛ الاثنان في نفس settings.delivery.)
         deliveryFee(wilayaId, baladiyaLabel, type) {
             // الزبون المسجَّل لا يُحتسب له توصيل إطلاقاً (التوصيل للزبون العابر فقط).
             if (getCustomerSession()) return 0;
             const d = getSettings().delivery || { office: {}, home: {} };
             const wid = String(wilayaId || '');
             if (!wid) return 0;
-            // المكتب والمنزل كلاهما الآن بسعر واحد لكل ولاية؛ المنزل لا يعتمد البلدية
-            // (يظهر السعر مباشرة بمجرّد اختيار الولاية، اختار بلدية أو لم يختر).
-            if (type === 'office') {
-                return Number(d.office?.[wid] ?? 0) || 0;
+            const office = type === 'office';
+
+            // بلدية محدّدة ولها سعر خاص → تتقدّم على سعر الولاية (0 = توصيل مجاني).
+            const code = communeCodeOf(baladiyaLabel);
+            if (code) {
+                const map = office ? d.officeCommune : d.homeCommune;
+                const v = map ? map[wid + '|' + code] : undefined;
+                if (v !== undefined && v !== null && v !== '') return Number(v) || 0;
             }
-            return Number(d.home?.[wid] ?? 0) || 0;
+
+            return Number((office ? d.office?.[wid] : d.home?.[wid]) ?? 0) || 0;
         },
 
         // ----- formatting -----

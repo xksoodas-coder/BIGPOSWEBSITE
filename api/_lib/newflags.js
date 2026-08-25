@@ -26,6 +26,12 @@ export async function ensureFlagsTable(client) {
             PRIMARY KEY (store_id, product_uuid)
         )
     `);
+    // فهرس «أحدث منتج معلَّم» — يجعل نبض الإشعارات يقرأ **سطراً واحداً** بدل
+    // مسح كل أعلام المتجر في كل استطلاع. يُنشأ مرّة عند أوّل كتابة من الأدمين.
+    await client.execute(`
+        CREATE INDEX IF NOT EXISTS idx_flags_store_new_marked
+            ON bws_product_flags (store_id, is_new, marked_at)
+    `);
 }
 
 // كاش قصير في الذاكرة لكل متجر (يقلّل قراءات Turso في مسار عرض المنتجات).

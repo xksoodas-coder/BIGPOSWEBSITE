@@ -28,6 +28,11 @@ export async function ensureDiscountTable(client) {
             PRIMARY KEY (store_id, product_uuid)
         )
     `);
+    // فهرس «أحدث تخفيض» — نفس غاية فهرس الأعلام: سطر واحد لكل نبضة إشعارات.
+    await client.execute(`
+        CREATE INDEX IF NOT EXISTS idx_discounts_store_updated
+            ON bws_product_discounts (store_id, updated_at)
+    `);
 }
 
 // كاش قصير في الذاكرة لكل متجر (يقلّل قراءات Turso في مسار عرض المنتجات).

@@ -133,6 +133,9 @@ export default async function handler(req, res) {
             available: qty > 0,
             unitType: full.unitType ?? 'قطعة',
             family: (full.family || '').toString().trim(),
+            // تاريخا الإنتاج والصلاحية كما أرسلهما الهاتف/الحاسوب في حمولة المنتج.
+            manufactureDate: (full.manufactureDate ?? full.ManufactureDate ?? '').toString(),
+            expiryDate: (full.expiryDate ?? full.ExpiryDate ?? '').toString(),
             imageUrl: imageVersion ? productImageUrl(access.storeId, uuid, imageVersion) : '',
             imageUrlLegacy: imageVersion ? productImageUrlLegacy(uuid, imageVersion) : ''
         });
