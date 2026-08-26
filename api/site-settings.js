@@ -50,18 +50,25 @@ const PULSE_MEMO_MS = 10 * 60 * 1000;
 // والتأخير يصير محكومًا بدورة الفحص في الهاتف (٣٠ دقيقة) لا بالكاش.
 const PULSE_EDGE_S = 600;
 
-function sendPulseJson(res, payload) {
-    res.setHeader('Cache-Control',
-        `public, s-maxage=${PULSE_EDGE_S}, stale-while-revalidate=${PULSE_EDGE_S}`);
+function sendPulseJson(res, payload, { fresh = false } = {}) {
+    // الرد الطازج لا يُخزَّن إطلاقًا كي لا يُسمّم الكاش المشترك بعنوانه المؤقّت.
+    res.setHeader('Cache-Control', fresh
+        ? 'no-store'
+        : `public, s-maxage=${PULSE_EDGE_S}, stale-while-revalidate=${PULSE_EDGE_S}`);
     res.setHeader('Vary', 'x-store-slug');
     res.status(200).json(payload);
 }
 
-async function sendPulse(client, storeId, res) {
-    const cached = _pulseMemo.get(storeId);
-    if (cached && Date.now() - cached.at < PULSE_MEMO_MS) {
-        sendPulseJson(res, cached.payload);
-        return;
+async function sendPulse(client, storeId, res, { fresh = false } = {}) {
+    // fresh=1 (زرّ «فحص التحديثات الآن») يتجاوز **كلا** الكاشين: كاش الحافة
+    // (بعنوان مختلف) وكاش الذاكرة هنا. بدونه كان الفحص اليدوي بعد تعليم منتج
+    // مباشرةً يقرأ نسخة عمرها حتى 10 دقائق ويقول «لا جديد».
+    if (!fresh) {
+        const cached = _pulseMemo.get(storeId);
+        if (cached && Date.now() - cached.at < PULSE_MEMO_MS) {
+            sendPulseJson(res, cached.payload);
+            return;
+        }
     }
 
     const run = async (sql, args) => {
@@ -135,7 +142,7 @@ async function sendPulse(client, storeId, res) {
     };
     if (_pulseMemo.size > 200) _pulseMemo.clear();
     _pulseMemo.set(storeId, { at: Date.now(), payload });
-    sendPulseJson(res, payload);
+    sendPulseJson(res, payload, { fresh });
 }
 
 export default async function handler(req, res) {
@@ -160,7 +167,8 @@ export default async function handler(req, res) {
                 res.status(400).json({ error: 'رمز المتجر مطلوب' });
                 return;
             }
-            await sendPulse(client, storeId, res);
+            const fresh = String(req.query?.fresh || '') === '1';
+            await sendPulse(client, storeId, res, { fresh });
             return;
         }
 
