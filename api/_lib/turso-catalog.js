@@ -45,7 +45,12 @@ function shapeProduct(storeId, row) {
                     name: String(x.name ?? ''),
                     capacity: Number(x.capacity ?? 0),
                     // سعر بيع الصندوق (0 = غير محدَّد → يُحسب من سعر الوحدة × السعة).
-                    boxPrice: Number(x.box_price ?? x.boxPrice ?? 0)
+                    boxPrice: Number(x.box_price ?? x.boxPrice ?? 0),
+                    // مستويا سعر الصندوق 2 و3 («الصندوق الرئيسي» ⭐ وحده يحملهما،
+                    // 0 = غير محدَّد). لا يخرجان للزبون: projectProductPrices
+                    // يختار منهما مستوى المشتري ويُسقط الباقي من الحمولة.
+                    boxPrice2: Number(x.box_price2 ?? x.boxPrice2 ?? 0),
+                    boxPrice3: Number(x.box_price3 ?? x.boxPrice3 ?? 0)
                 }))
                 .filter((x) => x.name && x.capacity > 0);
         }

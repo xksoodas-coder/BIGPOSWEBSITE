@@ -85,6 +85,9 @@ export default async function handler(req, res) {
         // ----- 2. Settings (raw) + guest tier, in one batched round-trip -----
         let settings = null;
         let guestTier = null;
+        // مستوى سعر الصندوق العام للمتجر (1..3) — من نفس صفّ turso_web_settings
+        // (بلا قراءة إضافية). غيابه = 1، أي سلوك ما قبل هذه الميزة.
+        let guestBoxTier = 1;
         try {
             const rs = await client.batch([
                 { sql: `SELECT settings_json FROM bws_site_settings WHERE store_id = ?`, args: [storeId] },
@@ -98,6 +101,8 @@ export default async function handler(req, res) {
                     const wj = JSON.parse(rs[1].rows[0].json_payload || '{}');
                     const t = Number(wj.guestPriceTier);
                     if (t >= 1 && t <= 7) guestTier = t;
+                    const b = Number(wj.guestBoxPriceTier);
+                    if (b >= 1 && b <= 3) guestBoxTier = b;
                 } catch { /* ignore */ }
             }
         } catch { /* settings tables may not exist yet */ }
@@ -118,13 +123,13 @@ export default async function handler(req, res) {
         // تُكشف باقي المستويات (الجملة/الخاصة) للزبون.
         // تُحلّ مستويات الزبون من المرآة وقت الطلب (لا من التوكن) → أي تغيير على
         // الهاتف (السعر الخاص أو صلاحيته) يظهر بمجرّد refresh بلا خروج ودخول.
-        const { allowed, pricePerProduct } = await buyerPricingLive(
-            client, storeId, loggedIn ? session : null, guestTier || 1);
+        const { allowed, pricePerProduct, boxTier } = await buyerPricingLive(
+            client, storeId, loggedIn ? session : null, guestTier || 1, guestBoxTier);
         // تخفيضات المتجر (يضبطها الأدمين) — تُطبَّق على كل منتج مُعاد.
         let discounts = new Map();
         try { discounts = await getStoreDiscounts(storeId); } catch { /* لا تخفيضات */ }
         const projectP = (p) => {
-            const proj = projectProductPrices(p, allowed, pricePerProduct);
+            const proj = projectProductPrices(p, allowed, pricePerProduct, boxTier);
             applyDiscount(proj, discounts.get(p.uuid));
             return proj;
         };

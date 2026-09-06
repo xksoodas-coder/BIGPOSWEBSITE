@@ -3,7 +3,7 @@ import { getTursoClient } from './_lib/turso.js';
 import { readSessionFromRequest } from './_lib/session.js';
 import { resolveStoreAccess, getStoreSettings } from './_lib/access.js';
 import { getCatalog } from './_lib/turso-catalog.js';
-import { buyerPricingLive, guestPriceTier, priceForTier } from './_lib/pricing.js';
+import { buyerPricingLive, guestPriceTiers, priceForTier, boxPriceForTier } from './_lib/pricing.js';
 import { clientIp, isRateLimited, recordFailure } from './_lib/ratelimit.js';
 
 // حدّ إنشاء الطلبات لكل IP (نافذة 10 دقائق) — يمنع إغراق المتجر بطلبات.
@@ -228,9 +228,9 @@ export default async function handler(req, res) {
             // (buyerPricingLive) كي يكون السعر المفروض هنا مطابقًا تمامًا للسعر
             // الذي رآه الزبون: يشمل «سعر الموقع» كافتراضي للمسجّل بلا سعر خاص،
             // ويقرأ السعر الخاص وصلاحيته حيّةً من المرآة لا من التوكن.
-            const gt = await guestPriceTier(client, storeId);
-            const { allowed: allowedTiers, pricePerProduct } =
-                await buyerPricingLive(client, storeId, session || null, gt);
+            const gt = await guestPriceTiers(client, storeId);
+            const { allowed: allowedTiers, pricePerProduct, boxTier } =
+                await buyerPricingLive(client, storeId, session || null, gt.unit, gt.box);
 
             for (const it of cleanItems) {
                 const prod = it.uuid ? byUuid.get(it.uuid) : null;
@@ -259,8 +259,12 @@ export default async function handler(req, res) {
                             || prod.sizes.find(s => s.name === box.name))
                         : null;
                     if (prodSize && Number(prodSize.sizeId) > 0) box.size_id = Number(prodSize.sizeId);
-                    const trustedBox = (prodSize && Number(prodSize.boxPrice) > 0)
-                        ? Number(prodSize.boxPrice)
+                    // سعر الصندوق الموثوق بمستوى **هذا المشتري** بعينه — نفس دالة
+                    // الكتالوج (boxPriceForTier)، فالسعر المفروض هنا هو حرفياً
+                    // السعر الذي عُرض له، ولا يتسرّب مستوى آخر إلى الطلبية.
+                    const trustedBoxPrice = boxPriceForTier(prodSize, boxTier);
+                    const trustedBox = trustedBoxPrice > 0
+                        ? trustedBoxPrice
                         : allowedPrices[0] * Number(box.capacity);
                     it.price = (Math.abs(trustedBox - submitted) < 0.01) ? submitted : trustedBox;
                     box.price = it.price; // نثبّت سعر الصندوق الموثوق في التفصيل

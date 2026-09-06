@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS bws_products (
     image_version TEXT    NOT NULL DEFAULT '',    -- منه يُبنى رابط صورة R2
     barcode       TEXT    NOT NULL DEFAULT '',
     web_visible   INTEGER NOT NULL DEFAULT 1,     -- 1=ظاهر، 0=مخفي
-    sizes         TEXT    NOT NULL DEFAULT '[]',  -- JSON: [{ "size_id": n, "name": "...", "capacity": n, "box_price": n }]  (سعر الشراء لا يُخزَّن هنا — سرّي)
+    sizes         TEXT    NOT NULL DEFAULT '[]',  -- JSON: [{ "size_id": n, "name": "...", "capacity": n, "box_price": n, "box_price2": n, "box_price3": n, "stock": n, "is_main": bool }]  (box_price2/3 = مستويا سعر الصندوق 2 و3 على «الصندوق الرئيسي» وحده، 0 = غير محدَّد؛ سعر الشراء لا يُخزَّن هنا — سرّي)
     updated_at    TEXT    NOT NULL DEFAULT (CURRENT_TIMESTAMP),
     PRIMARY KEY (store_id, uuid)
 );

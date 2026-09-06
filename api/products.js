@@ -3,7 +3,7 @@ import { resolveReadAccess, getStoreSettings } from './_lib/access.js';
 // قراءة عبر الموجّه: Turso (bws_products) إن كان المتجر منسوخًا، وإلا Supabase.
 import { getCatalog, getFamilyPage } from './_lib/turso-catalog.js';
 import { splitFamilies } from './_lib/families.js';
-import { buyerPricingLive, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
+import { buyerPricingLive, guestPriceTiers, projectProductPrices } from './_lib/pricing.js';
 import { getStoreDiscounts, applyDiscount } from './_lib/discounts.js';
 import { getStoreNewFlags, setNewFlag } from './_lib/newflags.js';
 import { readSessionFromRequest } from './_lib/session.js';
@@ -89,12 +89,13 @@ export default async function handler(req, res) {
         const settings = await getStoreSettings(storeId);
         const hideOOS = settings.showOutOfStock === false;
 
-        // سعر الموقع = الافتراضي للجميع (زائر ومسجّل بلا سعر خاص). نجلبه دائمًا.
-        const gt = await guestPriceTier(client, storeId);
+        // سعر الموقع (القطعة والصندوق) = الافتراضي للجميع (زائر ومسجّل بلا سعر
+        // خاص). قراءة واحدة تحمل المستويين.
+        const gt = await guestPriceTiers(client, storeId);
         // تُحلّ مستويات الزبون من المرآة وقت الطلب (لا من التوكن) → تغيير السعر
         // الخاص أو صلاحيته على الهاتف يظهر بمجرّد refresh بلا خروج ودخول.
-        const { allowed, pricePerProduct } =
-            await buyerPricingLive(client, storeId, session, gt);
+        const { allowed, pricePerProduct, boxTier } =
+            await buyerPricingLive(client, storeId, session, gt.unit, gt.box);
 
         // تخفيضات المتجر (يضبطها الأدمين) — تُطبَّق بعد إسقاط الأسعار.
         const discounts = await getStoreDiscounts(storeId);
@@ -110,7 +111,7 @@ export default async function handler(req, res) {
                 const { products: pageRows, total } = await getFamilyPage(
                     storeId, familyFilter, { hideOOS, limit, offset });
                 const products = pageRows.map((p) => {
-                    const proj = projectProductPrices(p, allowed, pricePerProduct);
+                    const proj = projectProductPrices(p, allowed, pricePerProduct, boxTier);
                     applyDiscount(proj, discounts.get(p.uuid));
                     proj.isFavorite = favSet.has(p.uuid);
                     proj.isNew = newFlags.has(p.uuid);
@@ -139,7 +140,7 @@ export default async function handler(req, res) {
             if (favoritesOnly && !isFavorite) continue;
             const isNew = newFlags.has(p.uuid);
             if (filter === 'new' && !isNew) continue;
-            const proj = projectProductPrices(p, allowed, pricePerProduct);
+            const proj = projectProductPrices(p, allowed, pricePerProduct, boxTier);
             applyDiscount(proj, discounts.get(p.uuid));
             // فلتر «تخفيضات»: بعد applyDiscount فقط، لأن التخفيض لا يُعتبر ساريًا
             // إلا إذا كان السعر القديم أعلى فعلاً من السعر المعروض لهذا المشتري.

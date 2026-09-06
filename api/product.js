@@ -1,7 +1,7 @@
 import { getTursoClient } from './_lib/turso.js';
 import { resolveReadAccess } from './_lib/access.js';
 import { productImageUrl, productImageUrlLegacy } from './_lib/r2.js';
-import { buyerPricingLive, guestPriceTier, projectProductPrices } from './_lib/pricing.js';
+import { buyerPricingLive, guestPriceTiers, projectProductPrices } from './_lib/pricing.js';
 import { getStoreDiscounts, applyDiscount } from './_lib/discounts.js';
 
 /**
@@ -91,10 +91,11 @@ export default async function handler(req, res) {
         } catch { /* table may not exist yet */ }
 
         // سعر الموقع = الافتراضي للجميع (زائر ومسجّل بلا سعر خاص). نجلبه دائمًا.
-        const gt = await guestPriceTier(client, access.storeId);
+        // (هذه الاستجابة لا تحمل صناديق، فمستوى الصندوق لا أثر له هنا.)
+        const gt = await guestPriceTiers(client, access.storeId);
         // مستويات الزبون تُقرأ حيّة من المرآة (لا من التوكن) → refresh يكفي.
         const { allowed, pricePerProduct } =
-            await buyerPricingLive(client, access.storeId, access.session, gt);
+            await buyerPricingLive(client, access.storeId, access.session, gt.unit, gt.box);
         const priced = projectProductPrices({
             price1: Number(full.sellPrice ?? 0),
             price2: Number(full.wholesalePrice ?? 0),

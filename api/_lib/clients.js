@@ -28,14 +28,18 @@ export async function findClientByUsername(client, storeId, username) {
     }
 }
 
-/** The customer row for a uuid, or null (used to read the pre-computed debt). */
+/** The customer row for a uuid, or null (used to read the pre-computed debt).
+ *
+ * `SELECT *` on purpose: the mirror gains columns as the phone app grows
+ * (box_price_tier was the first), and naming them here would make this read —
+ * the one every priced request depends on — fail with "no such column" on any
+ * store whose table predates the new column, silently dropping the customer
+ * back to guest pricing. One indexed row either way. */
 export async function getClientByUuid(client, storeId, uuid) {
     if (!uuid) return null;
     try {
         const r = await client.execute({
-            sql: `SELECT uuid, name, phone, web_enabled, price_tier,
-                         special_price_enabled, debt
-                  FROM bws_clients WHERE store_id = ? AND uuid = ? LIMIT 1`,
+            sql: `SELECT * FROM bws_clients WHERE store_id = ? AND uuid = ? LIMIT 1`,
             args: [storeId, String(uuid)]
         });
         return r.rows[0] || null;
@@ -81,5 +85,20 @@ export function priceTiersFromClient(row) {
     const special = Number(row.special_price_enabled) === 1;
     const tier = Number(row.price_tier);
     if (special && tier >= 1 && tier <= 7) return [tier];
+    return null;
+}
+
+/**
+ * The customer's EXPLICIT **box** price tier (1..3) from a mirror row, or `null`
+ * meaning "follow the store's general web box price (guestBoxPriceTier)".
+ *
+ * Same switch as the unit price: OFF → null, ON → [1..3]. A row written by an
+ * older phone build has no `box_price_tier` at all → NaN → null, i.e. the store
+ * web box price, which is exactly the behaviour before this field existed.
+ */
+export function boxPriceTierFromClient(row) {
+    const special = Number(row.special_price_enabled) === 1;
+    const tier = Number(row.box_price_tier);
+    if (special && tier >= 1 && tier <= 3) return tier;
     return null;
 }
